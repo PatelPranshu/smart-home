@@ -14,7 +14,9 @@ app.use(cors({
   // origin: '*' // allows everyone (easiest for testing)
   // OR strictly allow only your Vercel app:
   origin: 'https://smart-home-lovat.vercel.app/'
+
 }));
+// app.use(cors());
 app.use(express.json());
 
 // 1. Database Connection
@@ -33,6 +35,7 @@ mqttClient.on('connect', () => {
   console.log('Backend connected to MQTT Broker');
   mqttClient.subscribe('devices/+/update'); // Listener for manual flips
   mqttClient.subscribe('devices/+/sync');   // Listener for reboots
+  mqttClient.subscribe('devices/+/status'); // <--- NEW: Listen for Online/Offline
 });
 
 // Listen for updates FROM the ESP32 (Manual switch presses)
@@ -40,7 +43,7 @@ mqttClient.on('connect', () => {
 mqttClient.on('message', async (topic, message) => {
   const parts = topic.split('/');
   const deviceId = parts[1];
-  const type = parts[2]; // 'update' or 'sync'
+    const type = parts[2]; // 'update', 'sync', or 'status'
 
   // CASE A: User flipped physical switch -> Update DB
  // CASE A: User flipped physical switch -> Update DB
@@ -79,6 +82,20 @@ mqttClient.on('message', async (topic, message) => {
         mqttClient.publish(`devices/${deviceId}/command`, payload);
       });
     }
+  }
+
+
+  // CASE C: Device Status Change (Online/Offline)
+  if (type === 'status') {
+    const status = message.toString(); // "online" or "offline"
+    const isOnline = status === 'online';
+    
+    console.log(`Device ${deviceId} is now ${status}`);
+    
+    await Device.updateOne(
+        { deviceId: deviceId },
+        { $set: { isOnline: isOnline } }
+    );
   }
 });
 

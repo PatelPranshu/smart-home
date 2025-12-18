@@ -4,13 +4,14 @@ const DeviceSchema = new mongoose.Schema({
   deviceId: { type: String, required: true, unique: true },
   secret: { type: String, required: true },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  isOnline: { type: Boolean, default: false }, // <--- NEW FIELD
   switches: [{
     id: Number,
     name: String,
     state: Boolean,
     type: { type: String, default: 'light' },
-    lastOnTime: { type: Date, default: null },      // NEW: Tracks when it turned ON
-    timerExpiresAt: { type: Date, default: null }   // NEW: Tracks when it will turn OFF
+    lastOnTime: { type: Date, default: null },
+    timerExpiresAt: { type: Date, default: null }
   }]
 });
 

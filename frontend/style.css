@@ -593,3 +593,65 @@ header {
     transition: 0.2s;
 }
 .btn-timer:hover { background: #16a34a; }
+/* --- OFFLINE STATE --- */
+.device-offline {
+    position: relative;
+    pointer-events: none; /* Stops all clicks */
+}
+
+/* This blurs the content INSIDE the card (Header, Footer) */
+.device-offline .card-header,
+.device-offline .card-footer,
+.device-offline .card-options {
+    filter: blur(4px);
+    opacity: 0.5;
+}
+
+/* The Overlay Message (stays sharp) */
+.offline-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 50; /* Above everything */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #ef4444; /* Red color */
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.4); /* Slight white tint */
+}
+
+.offline-overlay i {
+    font-size: 2rem;
+    margin-bottom: 5px;
+}
+
+/* --- LOADING SPINNER --- */
+.spinner {
+    display: none; /* Hidden by default */
+    width: 24px;
+    height: 24px;
+    border: 3px solid #e5e7eb; /* Light Grey background ring */
+    border-top: 3px solid #3b82f6; /* Blue spinner */
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* When the card has the 'loading' class: */
+.card-loading {
+    pointer-events: none; /* Prevent double clicking */
+    opacity: 0.8;
+}
+
+.card-loading .device-icon i {
+    display: none; /* Hide the static icon */
+}
+
+.card-loading .spinner {
+    display: block; /* Show the spinner */
+}

@@ -104,6 +104,9 @@ const typeIcons = {
 
 function renderGrid(devices) {
     devices.forEach(device => {
+        // CHECK ONLINE STATUS
+        const isOnline = device.isOnline; // True or False
+
         device.switches.forEach(sw => {
             const domId = `card-${device.deviceId}-${sw.id}`;
             let card = document.getElementById(domId);
@@ -116,7 +119,8 @@ function renderGrid(devices) {
             let runtimeText = "";
             let timerText = "";
 
-            if (sw.state && sw.lastOnTime) {
+            // Only calculate time if the device is ON and ONLINE
+            if (isOnline && sw.state && sw.lastOnTime) {
                 const diffMs = new Date() - new Date(sw.lastOnTime);
                 const mins = Math.floor(diffMs / 60000);
                 const hrs = Math.floor(mins / 60);
@@ -124,7 +128,7 @@ function renderGrid(devices) {
                 else runtimeText = `${mins} mins`;
             }
 
-            if (sw.state && sw.timerExpiresAt) {
+            if (isOnline && sw.state && sw.timerExpiresAt) {
                 const timeLeftMs = new Date(sw.timerExpiresAt) - new Date();
                 if (timeLeftMs > 0) {
                     const minsLeft = Math.ceil(timeLeftMs / 60000);
@@ -138,6 +142,11 @@ function renderGrid(devices) {
                 card.id = domId;
                 
                 card.innerHTML = `
+                    <div class="offline-overlay hidden">
+                        <i class="fa-solid fa-wifi"></i>
+                        <span>Disconnected</span>
+                    </div>
+
                     <div class="card-options">
                         <i class="fa-solid fa-ellipsis-vertical"></i>
                     </div>
@@ -145,6 +154,7 @@ function renderGrid(devices) {
                     <div class="card-header">
                         <div class="device-icon">
                             <i class="fa-solid ${iconClass}"></i>
+                            <div class="spinner"></div>
                         </div>
                     </div>
                     
@@ -162,26 +172,47 @@ function renderGrid(devices) {
                 deviceGrid.appendChild(card);
             }
 
-            // --- 2. ALWAYS UPDATE LISTENERS (The Fix) ---
+            // --- 2. HANDLE OFFLINE STATE ---
+            const overlay = card.querySelector('.offline-overlay');
             
-            // Update "Three Dots" Click Event with FRESH data (New Type/Name)
+            if (!isOnline) {
+                // Device is OFFLINE
+                // We append 'device-offline' but keep 'device-card' base class
+                card.classList.add('device-offline'); 
+                overlay.classList.remove('hidden');   
+                card.onclick = null; // Disable clicking
+            } else {
+                // Device is ONLINE
+                card.classList.remove('device-offline');
+                overlay.classList.add('hidden');
+                
+                // Re-enable clicking (only if not currently loading)
+                if (!card.classList.contains('card-loading')) {
+                    card.onclick = () => toggleDevice(device.deviceId, sw.id, !sw.state, card);
+                }
+            }
+
+            // --- 3. ALWAYS UPDATE LISTENERS ---
+            // Update "Three Dots" Click Event with FRESH data
             const optionsBtn = card.querySelector('.card-options');
-            optionsBtn.onclick = (e) => {
-                e.stopPropagation(); // Stop the card from clicking
-                openModal(device.deviceId, sw.id, sw.name, dbType);
-            };
+            if(optionsBtn) {
+                optionsBtn.onclick = (e) => {
+                    e.stopPropagation(); 
+                    if(isOnline) openModal(device.deviceId, sw.id, sw.name, dbType);
+                };
+            }
 
-            // Update Main Card Click Event
-            card.onclick = () => toggleDevice(device.deviceId, sw.id, !sw.state, card);
-
-            // --- 3. LIVE VISUAL UPDATES ---
+            // --- 4. LIVE VISUAL UPDATES ---
             
-            // Update Name & Icon
+            // Update Name
             const nameEl = card.querySelector('.device-name');
             if(nameEl) nameEl.innerText = sw.name;
 
+            // Update Icon (Only if NOT loading to prevent flicker)
             const iconEl = card.querySelector('.device-icon i');
-            if(iconEl) iconEl.className = `fa-solid ${iconClass}`;
+            if(iconEl && !card.classList.contains('card-loading')) {
+                iconEl.className = `fa-solid ${iconClass}`;
+            }
 
             // Update Time Texts
             const runtimeDiv = card.querySelector('.runtime-display');
@@ -196,24 +227,31 @@ function renderGrid(devices) {
                 timerDiv.style.display = timerText ? 'block' : 'none';
             }
 
-            // Update ON/OFF Colors
-            const isActive = sw.state; 
-            const statusText = card.querySelector('.device-status');
-            const iconDiv = card.querySelector('.device-icon');
+            // Update ON/OFF Colors (Only if NOT loading)
+            if (!card.classList.contains('card-loading')) {
+                const isActive = sw.state; 
+                const statusText = card.querySelector('.device-status');
+                const iconDiv = card.querySelector('.device-icon');
 
-            if (isActive) {
-                card.className = 'device-card is-active';
-                if(iconDiv) iconDiv.className = `device-icon icon-on`;
-                if(statusText) {
-                    statusText.className = 'device-status text-on';
-                    statusText.innerText = 'ON';
-                }
-            } else {
-                card.className = 'device-card';
-                if(iconDiv) iconDiv.className = `device-icon icon-off`;
-                if(statusText) {
-                    statusText.className = 'device-status text-off';
-                    statusText.innerText = 'OFF';
+                // Base class logic
+                let baseClass = 'device-card';
+                if (!isOnline) baseClass += ' device-offline';
+                else if (isActive) baseClass += ' is-active';
+
+                card.className = baseClass;
+
+                if (isActive) {
+                    if(iconDiv) iconDiv.className = `device-icon icon-on`;
+                    if(statusText) {
+                        statusText.className = 'device-status text-on';
+                        statusText.innerText = 'ON';
+                    }
+                } else {
+                    if(iconDiv) iconDiv.className = `device-icon icon-off`;
+                    if(statusText) {
+                        statusText.className = 'device-status text-off';
+                        statusText.innerText = 'OFF';
+                    }
                 }
             }
         });
@@ -221,42 +259,71 @@ function renderGrid(devices) {
 }
 // --- TOGGLE FUNCTION (FIXED: No Dot Error) ---
 async function toggleDevice(deviceId, switchId, newState, cardElement) {
-    // 1. Optimistic UI Update
-    const statusText = cardElement.querySelector('.device-status');
-    const iconDiv = cardElement.querySelector('.device-icon');
+    // 1. START LOADING ANIMATION
+    cardElement.classList.add('card-loading');
 
-    if(newState) {
-        cardElement.classList.add('is-active');
-        if(iconDiv) iconDiv.classList.replace('icon-off', 'icon-on');
-        if(statusText) {
-            statusText.classList.replace('text-off', 'text-on');
-            statusText.innerText = "ON";
-        }
-    } else {
-        cardElement.classList.remove('is-active');
-        if(iconDiv) iconDiv.classList.replace('icon-on', 'icon-off');
-        if(statusText) {
-            statusText.classList.replace('text-on', 'text-off');
-            statusText.innerText = "OFF";
-        }
-    }
+    // Create a Timeout Controller (Stops request after 5 seconds)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    // 2. Send to Backend
     try {
-        await fetch(`${API_URL}/control`, {
+        // 2. SEND REQUEST (With Timeout)
+        const response = await fetch(`${API_URL}/control`, {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
                 'x-access-token': token
             },
-            body: JSON.stringify({ deviceId, switchId, state: newState })
+            body: JSON.stringify({ deviceId, switchId, state: newState }),
+            signal: controller.signal // <--- Connects the timeout
         });
         
-        setTimeout(fetchDevices, 500);
+        // Clear timeout since request finished
+        clearTimeout(timeoutId); 
+
+        // 3. CHECK FOR SERVER ERRORS
+        if (!response.ok) {
+            throw new Error(`Server Error: ${response.status}`);
+        }
+
+        // 4. UPDATE UI (Only if successful)
+        // Manually flip the classes so user sees result instantly
+        const statusText = cardElement.querySelector('.device-status');
+        const iconDiv = cardElement.querySelector('.device-icon');
+
+        if(newState) {
+            cardElement.classList.add('is-active');
+            if(iconDiv) iconDiv.className = 'device-icon icon-on';
+            if(statusText) {
+                statusText.classList.replace('text-off', 'text-on');
+                statusText.innerText = "ON";
+            }
+        } else {
+            cardElement.classList.remove('is-active');
+            if(iconDiv) iconDiv.className = 'device-icon icon-off';
+            if(statusText) {
+                statusText.classList.replace('text-on', 'text-off');
+                statusText.innerText = "OFF";
+            }
+        }
+
     } catch (err) {
-        console.error("Toggle failed", err);
-        fetchDevices(); 
-        alert("Connection Error");
+        console.error("Toggle failed:", err);
+        
+        // Specific error message for timeout
+        if (err.name === 'AbortError') {
+            alert("Request timed out. Device may be offline.");
+        } else {
+            alert("Connection Failed. Please try again.");
+        }
+        // We do NOT update the UI here, so it reverts to original state
+
+    } finally {
+        // 5. STOP LOADING (This ALWAYS runs, success or fail)
+        cardElement.classList.remove('card-loading');
+        
+        // Trigger background sync just to be safe
+        setTimeout(fetchDevices, 1000);
     }
 }
 // --- AUTH UI TOGGLE ---
