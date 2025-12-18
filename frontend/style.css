@@ -1,0 +1,595 @@
+/* =========================================
+   SMART HOME DASHBOARD - FINAL STYLES
+   ========================================= */
+
+/* --- 1. CSS VARIABLES (THEME) --- */
+:root {
+    --bg-color: #f2f2f7;
+    --surface-color: #ffffff;
+    --primary-color: #3b82f6; /* Bright Blue */
+    --primary-hover: #2563eb;
+    --text-main: #1f2937;
+    --text-sub: #9ca3af;
+    --success-color: #22c55e;
+    --danger-color: #ef4444;
+    --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+    --shadow-hover: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --radius-lg: 1rem;       /* 16px */
+    --radius-xl: 1.5rem;     /* 24px */
+    --radius-xxl: 2rem;      /* 32px */
+    --header-height: 80px;
+    --nav-height: 80px;
+}
+
+/* --- 2. GLOBAL RESET --- */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', sans-serif;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden; /* Prevents whole page scroll */
+    display: flex;
+    flex-direction: column;
+}
+
+/* Utilities */
+.hidden { display: none !important; }
+.fade-in { animation: fadeIn 0.4s ease-out forwards; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- 3. LOGIN SCREEN --- */
+.login-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background-color: var(--bg-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 1.5rem;
+}
+
+.login-card {
+    background: var(--surface-color);
+    padding: 2rem;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-soft);
+    width: 100%;
+    max-width: 360px;
+    text-align: center;
+}
+
+.login-icon {
+    width: 80px;
+    height: 80px;
+    background-color: #eff6ff;
+    color: var(--primary-color);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    margin: 0 auto 2rem auto;
+}
+
+.form-group { margin-bottom: 1.25rem; }
+
+.input-field {
+    width: 100%;
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-lg);
+    background-color: #f9fafb;
+    border: 2px solid transparent;
+    outline: none;
+    transition: 0.2s;
+    font-size: 1rem;
+}
+.input-field:focus {
+    background-color: #fff;
+    border-color: #bfdbfe;
+}
+
+.btn-primary {
+    width: 100%;
+    padding: 0.875rem;
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 600;
+    border: none;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: 0.2s;
+    font-size: 1rem;
+}
+.btn-primary:hover { background-color: var(--primary-hover); }
+
+.error-msg {
+    color: var(--danger-color);
+    font-size: 0.8rem;
+    margin-top: 1rem;
+}
+
+/* --- 4. DASHBOARD LAYOUT --- */
+.dashboard-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    position: relative;
+}
+
+/* Header */
+header {
+    padding: 2rem 1.5rem 1rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    background-color: var(--bg-color);
+    flex-shrink: 0;
+}
+
+.user-avatar {
+    width: 40px;
+    height: 40px;
+    background: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    color: #666;
+}
+
+/* Filter Pills (Horizontal Scroll) */
+.category-scroll {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0 1.5rem 1.5rem 1.5rem;
+    overflow-x: auto;
+    flex-shrink: 0;
+    scrollbar-width: none;
+}
+.category-scroll::-webkit-scrollbar { display: none; }
+
+.pill {
+    padding: 0.5rem 1.25rem;
+    border-radius: 50px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    white-space: nowrap;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.pill.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+.pill.inactive {
+    background-color: white;
+    color: var(--text-sub);
+    border: 1px solid #f3f4f6;
+}
+
+/* --- 5. MAIN SCROLLABLE CONTENT --- */
+.content-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 1.5rem 8rem 1.5rem;
+}
+
+/* Stats Cards */
+.stats-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card {
+    background: var(--surface-color);
+    padding: 1rem;
+    border-radius: var(--radius-xxl);
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.bg-orange { background: #ffedd5; color: #f97316; }
+.bg-blue   { background: #dbeafe; color: #3b82f6; }
+
+/* Devices Grid */
+.section-title { font-size: 1.125rem; font-weight: 700; margin-bottom: 1rem; }
+
+.device-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+@media (min-width: 768px) {
+    .device-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 1024px) {
+    .device-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* --- 6. DEVICE CARD COMPONENT --- */
+/* --- FIXED DEVICE CARD ALIGNMENT --- */
+.device-card {
+    background: var(--surface-color);
+    padding: 1.25rem;
+    border-radius: var(--radius-xxl);
+    box-shadow: var(--shadow-soft);
+    
+    /* CHANGE 1: Use min-height so it can grow taller */
+    min-height: 160px;
+    height: auto; 
+    
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* Keeps content spaced nicely */
+    gap: 10px; /* Adds a little breathing room between sections */
+    
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.2s;
+    user-select: none;
+    border: 2px solid transparent;
+    position: relative; 
+    overflow: visible; /* Let content show properly */
+}
+
+.device-card:active { transform: scale(0.96); }
+.device-card:hover { box-shadow: var(--shadow-hover); }
+
+/* Active State Styles */
+.device-card.is-active {
+    border-color: #dbeafe;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.device-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    transition: background 0.3s, color 0.3s;
+}
+
+/* Icon State Colors */
+.icon-off { background: #f3f4f6; color: #9ca3af; }
+.icon-on  { background: var(--primary-color); color: white; }
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.dot-on { background-color: var(--success-color); }
+.dot-off { background-color: #fca5a5; }
+
+.device-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.25rem; color: #374151; }
+.device-status { font-size: 0.75rem; font-weight: 700; }
+.text-on { color: var(--primary-color); }
+.text-off { color: var(--text-sub); }
+
+/* --- 7. THREE DOTS MENU (UPDATED) --- */
+.card-options {
+    position: absolute;
+    top : 15px;
+    right: 15px;
+    
+    /* Darker color for visibility */
+    color: #4b5563; 
+    
+    cursor: pointer;
+    padding: 8px;
+    z-index: 10;
+    font-size: 1.1rem;
+    background: rgba(255, 255, 255, 0.5); /* Background circle */
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.card-options:hover, .card-options:active { 
+    color: #000000; 
+    background: rgba(0, 0, 0, 0.1);
+}
+
+/* If the card is ON (Blue Border/Active), make dots white-ish */
+.device-card.is-active .card-options {
+    color: #1e3a8a; /* Dark Blue */
+    background: rgba(219, 234, 254, 0.5);
+}
+
+/* --- 8. BOTTOM NAVIGATION --- */
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid #e5e7eb;
+    padding: 0.5rem 1.5rem 1.5rem 1.5rem;
+    z-index: 50;
+}
+
+.nav-inner {
+    display: flex;
+    justify-content: space-between;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.nav-btn {
+    background: none;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-sub);
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 60px;
+}
+
+.nav-btn i { font-size: 1.25rem; }
+.nav-btn.active { color: var(--primary-color); }
+.nav-btn:hover { color: var(--primary-color); }
+.nav-btn.logout:hover { color: var(--danger-color); }
+
+/* --- 9. MODAL STYLES --- */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 200;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(5px);
+}
+
+.modal-card {
+    background: white;
+    width: 90%;
+    max-width: 400px;
+    padding: 20px;
+    border-radius: 20px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(50px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+.close-btn {
+    background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666; width:auto;
+}
+
+.modal-section { margin-bottom: 20px; }
+.modal-section label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
+
+/* Input with Pen */
+.input-with-icon { position: relative; }
+.input-with-icon input { 
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding-right: 40px; 
+}
+.input-with-icon i {
+    position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: #999;
+}
+
+/* Type Grid */
+.type-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+}
+.type-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 10px;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: #666;
+    transition: 0.2s;
+}
+.type-option i { font-size: 1.25rem; margin-bottom: 2px; }
+.type-option:hover { background: #f3f4f6; }
+.type-option.selected {
+    background: #eff6ff;
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+/* Timer */
+.timer-input { display: flex; gap: 10px; align-items: center; }
+.timer-input input { 
+    width: 80px; 
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+.btn-timer { 
+    width: auto; 
+    background: #22c55e; 
+    padding: 10px 20px; 
+    color: white; 
+    border: none; 
+    border-radius: 8px; 
+    cursor: pointer; 
+}
+/* --- TIME INFO STYLES --- */
+.time-info {
+    margin-top: 8px; /* Added more space above the timer text */
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+/* The "Runtime" (Red box area) */
+.runtime-display {
+    font-size: 0.75rem;
+    color: #6b7280; /* Subtle grey */
+    font-weight: 500;
+}
+.is-active .runtime-display {
+    color: #3b82f6; /* Blue when active */
+}
+
+/* The "Timer Countdown" (Yellow box area) */
+.timer-display {
+    font-size: 0.75rem;
+    color: #f59e0b; /* Amber/Orange color for warning/timer */
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+/* Optional: Add a little clock icon via CSS if you want */
+.timer-display::before {
+    content: '\f017'; /* FontAwesome clock unicode */
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+}
+/* --- SPLIT FOOTER LAYOUT --- */
+.card-footer {
+    display: flex;
+    justify-content: space-between; /* Pushes Left and Right apart */
+    align-items: flex-end; /* Aligns them at the bottom */
+    width: 100%;
+    margin-top: auto; /* Pushes footer to bottom of card */
+}
+
+/* Name and Status (Left Side) */
+.footer-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+/* Time Info (Right Side - Red/Yellow Areas) */
+.footer-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end; /* Aligns text to the right */
+    gap: 4px;
+    text-align: right;
+}
+
+/* Runtime Text (Red Area) */
+.runtime-display {
+    font-size: 0.75rem;
+    color: #6b7280;
+    font-weight: 500;
+}
+.is-active .runtime-display {
+    color: #3b82f6;
+}
+
+/* Timer Text (Yellow Area) */
+.timer-display {
+    font-size: 0.75rem;
+    color: #f59e0b; /* Orange/Yellow */
+    font-weight: 700;
+    background: #fef3c7; /* Light yellow background bubble */
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+/* --- UPDATED TIMER STYLES --- */
+.timer-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.timer-field {
+    display: flex;
+    align-items: center;
+    background: #f9fafb;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 5px 10px;
+    flex: 1; /* Makes them equal width */
+}
+
+.timer-field input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    outline: none;
+    padding: 5px;
+}
+
+.timer-field span {
+    font-size: 0.8rem;
+    color: #9ca3af;
+    font-weight: 600;
+    margin-left: 5px;
+}
+
+.btn-timer {
+    background: #22c55e;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0 20px;
+    height: 42px; /* Match height of inputs */
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.btn-timer:hover { background: #16a34a; }
