@@ -7,13 +7,12 @@ const mqtt = require('mqtt');
 const cors = require('cors');
 const User = require('./models/User');
 const Device = require('./models/Device');
-const cors = require('cors');
 
 const app = express();
 app.use(cors({
   // origin: '*' // allows everyone (easiest for testing)
   // OR strictly allow only your Vercel app:
-  origin: 'https://smart-home-lovat.vercel.app/'
+  origin: 'https://smart-home-lovat.vercel.app'
 
 }));
 // app.use(cors());
