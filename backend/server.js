@@ -7,9 +7,14 @@ const mqtt = require('mqtt');
 const cors = require('cors');
 const User = require('./models/User');
 const Device = require('./models/Device');
+const cors = require('cors');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  // origin: '*' // allows everyone (easiest for testing)
+  // OR strictly allow only your Vercel app:
+  origin: 'https://smart-home-lovat.vercel.app/'
+}));
 app.use(express.json());
 
 // 1. Database Connection

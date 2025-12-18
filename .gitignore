@@ -3,6 +3,9 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+backend/create_device.js
+backend/create_admin.js
+
 # Environment Variables (CRITICAL: Never share your secrets!)
 .env
 .env.local
