@@ -12,7 +12,7 @@ const app = express();
 
 // --- CORS CONFIGURATION ---
 app.use(cors({
-  origin: '*', // Allows localhost, mobile IP, and vercel
+  origin: 'https://smart-home-lovat.vercel.app/', // Allows localhost, mobile IP, and vercel
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'x-access-token']
 }));
