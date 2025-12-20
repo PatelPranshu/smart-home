@@ -12,7 +12,7 @@ const app = express();
 
 // --- CORS CONFIGURATION ---
 app.use(cors({
-  origin: 'https://smart-home-lovat.vercel.app/', // Allows localhost, mobile IP, and vercel
+  origin: process.env.ORIGIN_URL, // Allows localhost, mobile IP, and vercel
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'x-access-token']
 }));
@@ -410,4 +410,6 @@ app.post('/smarthome', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => { // Listen on all interfaces
+    console.log(`🚀 Backend server running at http://localhost:${PORT}`);
+});
