@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Home Hub</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="login-view" class="login-overlay">
+        <div class="login-card">
+            <div class="login-icon">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">Smart Home</h1>
+            
+            <form id="login-form">
+                <p style="color: var(--text-sub); font-size: 0.9rem; margin-bottom: 2rem;">Secure Access</p>
+                <div class="form-group">
+                    <input type="email" id="email" class="input-field" placeholder="Email" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="password" class="input-field" placeholder="Password" required>
+                </div>
+                <button type="submit" class="btn-primary">Log In</button>
+                <p style="margin-top:15px; font-size: 0.8rem; color: #aaa; cursor:pointer;" onclick="toggleAuth('register')">Need an account? Sign up</p>
+            </form>
+
+            <form id="register-form" class="hidden">
+                <p style="color: var(--text-sub); font-size: 0.9rem; margin-bottom: 2rem;">Create Account</p>
+                <div class="form-group">
+                    <input type="email" id="reg-email" class="input-field" placeholder="New Email" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="reg-password" class="input-field" placeholder="New Password" required>
+                </div>
+                <button type="submit" class="btn-primary" style="background-color: var(--success-color);">Sign Up</button>
+                <p style="margin-top:15px; font-size: 0.8rem; color: #aaa; cursor:pointer;" onclick="toggleAuth('login')">Have an account? Log In</p>
+            </form>
+
+            <p id="auth-msg" class="error-msg hidden"></p>
+        </div>
+    </div>
+
+    <div id="dashboard-view" class="dashboard-container hidden">
+        
+        <header>
+            <div>
+                <p id="date-display" style="color: var(--text-sub); font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">Fetching date...</p>
+                <h2 style="font-size: 1.75rem; font-weight: 700; color: var(--text-main);">My Home</h2>
+            </div>
+            <div class="user-avatar" onclick="logout()">
+                <i class="fa-solid fa-right-from-bracket" style="color: #ef4444;"></i> 
+            </div>
+        </header>
+
+        <div class="category-scroll">
+            <button class="pill active">All Devices</button>
+            <button class="pill inactive">Living Room</button>
+            <button class="pill inactive">Bedroom</button>
+        </div>
+
+        <div class="content-area">
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-icon bg-orange"><i class="fa-solid fa-temperature-half"></i></div>
+                    <div>
+                        <p style="font-size: 0.7rem; color: #9ca3af; font-weight: 700;">TEMP</p>
+                        <p style="font-size: 1.125rem; font-weight: 700;">24°C</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon bg-blue"><i class="fa-solid fa-droplet"></i></div>
+                    <div>
+                        <p style="font-size: 0.7rem; color: #9ca3af; font-weight: 700;">HUMIDITY</p>
+                        <p style="font-size: 1.125rem; font-weight: 700;">45%</p>
+                    </div>
+                </div>
+            </div>
+
+            <h3 class="section-title">Devices</h3>
+            <div id="device-grid" class="device-grid"></div>
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-inner">
+                <button class="nav-btn active">
+                    <i class="fa-solid fa-house"></i>
+                    <span>Home</span>
+                </button>
+                <button class="nav-btn">
+                    <i class="fa-solid fa-bolt"></i>
+                    <span>Energy</span>
+                </button>
+                <button class="nav-btn" onclick="openSettingsModal()">
+                    <i class="fa-solid fa-gear"></i>
+                    <span>Settings</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Device Settings</h3>
+                <button onclick="closeModal()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="modal-section">
+                <label>Device Name</label>
+                <div class="input-with-icon">
+                    <input type="text" id="edit-name" placeholder="Enter Name">
+                    <i class="fa-solid fa-pen"></i>
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <label>Device Type</label>
+                <div class="type-grid">
+                    <div class="type-option" data-type="light" onclick="selectType('light')"><i class="fa-solid fa-lightbulb"></i><span>Light</span></div>
+                    <div class="type-option" data-type="fan" onclick="selectType('fan')"><i class="fa-solid fa-fan"></i><span>Fan</span></div>
+                    <div class="type-option" data-type="ac" onclick="selectType('ac')"><i class="fa-solid fa-snowflake"></i><span>AC</span></div>
+                    <div class="type-option" data-type="tv" onclick="selectType('tv')"><i class="fa-solid fa-tv"></i><span>TV</span></div>
+                    <div class="type-option" data-type="wifi" onclick="selectType('wifi')"><i class="fa-solid fa-wifi"></i><span>WiFi</span></div>
+                    <div class="type-option" data-type="socket" onclick="selectType('socket')"><i class="fa-solid fa-plug"></i><span>Socket</span></div>
+                    <div class="type-option" data-type="water" onclick="selectType('water')"><i class="fa-solid fa-faucet-drip"></i><span>Geyser</span></div>
+                    <div class="type-option" data-type="laundry" onclick="selectType('laundry')"><i class="fa-solid fa-shirt"></i><span>Laundry</span></div>
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <label>Auto Turn Off (Timer)</label>
+                <div class="timer-row">
+                    <div class="timer-field">
+                        <input type="number" id="timer-hrs" placeholder="0" min="0"><span>Hr</span>
+                    </div>
+                    <div class="timer-field">
+                        <input type="number" id="timer-mins" placeholder="0" min="0" max="59"><span>Min</span>
+                    </div>
+                    <button onclick="setTimer()" class="btn-timer">Set</button>
+                </div>
+            </div>
+
+            <div class="modal-section" style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 15px;">
+                <label>Update Device Wi-Fi</label>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <input type="text" id="wifi-ssid" placeholder="New Wi-Fi Name (SSID)" class="input-field" style="border: 1px solid #ddd; padding: 8px; border-radius: 6px;">
+                    <input type="text" id="wifi-pass" placeholder="New Wi-Fi Password" class="input-field" style="border: 1px solid #ddd; padding: 8px; border-radius: 6px;">
+                    <button onclick="updateWifiSettings()" class="btn-primary" style="background-color: #3b82f6;">Update Wi-Fi</button>
+                </div>
+                <p style="font-size: 0.75rem; color: #ef4444; margin-top: 5px;">* Device will restart upon update.</p>
+            </div>
+
+            <button onclick="saveChanges()" class="btn-primary" style="margin-top: 20px;">Save Name/Type</button>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Account Settings</h3>
+                <button onclick="closeSettingsModal()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="modal-section">
+                <label>Update Login Details</label>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <input type="email" id="new-email" placeholder="New Email" class="input-field" style="border: 1px solid #ddd; padding: 8px; border-radius: 6px;">
+                    <input type="password" id="new-password" placeholder="New Password" class="input-field" style="border: 1px solid #ddd; padding: 8px; border-radius: 6px;">
+                    <button onclick="updateUserAccount()" class="btn-primary" style="background-color: #3b82f6;">Update Account</button>
+                </div>
+            </div>
+
+            <div class="modal-section" style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 15px;">
+                 <button onclick="logout()" class="btn-primary" style="background-color: #ef4444; width: 100%;">Log Out</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

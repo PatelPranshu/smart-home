@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Home - Energy</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header>
+            <h2>Activity History</h2>
+        </header>
+
+        <div class="content-area">
+            <div id="history-list" class="history-list">
+                <p style="text-align: center; color: #999; margin-top: 50px;">Loading history...</p>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-inner">
+                <a href="home.html" class="nav-btn"><i class="fa-solid fa-house"></i><span>Home</span></a>
+                <a href="energy.html" class="nav-btn active"><i class="fa-solid fa-bolt"></i><span>Energy</span></a>
+                <a href="settings.html" class="nav-btn"><i class="fa-solid fa-gear"></i><span>Settings</span></a>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

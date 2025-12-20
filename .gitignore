@@ -3,8 +3,9 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
-backend/create_device.js
+# Admin & device bootstrap scripts (DO NOT COMMIT)
 backend/create_admin.js
+backend/create_device.js
 
 # Environment Variables (CRITICAL: Never share your secrets!)
 .env

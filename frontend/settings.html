@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Home - Settings</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header>
+            <h2>Settings</h2>
+        </header>
+
+        <div class="content-area" style="padding-top: 20px;">
+            
+            <div class="settings-card">
+                <h3><i class="fa-solid fa-user"></i> Account</h3>
+                <p id="user-email-display" style="color: #666; margin-bottom: 10px;">Loading...</p>
+                
+                <label>Change Password</label>
+                <input type="password" id="new-password" placeholder="New Password" class="input-field">
+                <button onclick="updateUserAccount()" class="btn-primary" style="margin-top: 10px;">Update Account</button>
+            </div>
+
+            <div class="settings-card" style="margin-top: 20px;">
+                <h3><i class="fa-solid fa-wifi"></i> Device Wi-Fi</h3>
+                <p style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">Select a device to update its Wi-Fi credentials.</p>
+                
+                <select id="device-select" class="input-field">
+                    <option>Loading devices...</option>
+                </select>
+
+                <input type="text" id="wifi-ssid" placeholder="New SSID" class="input-field" style="margin-top: 10px;">
+                <input type="text" id="wifi-pass" placeholder="New Password" class="input-field" style="margin-top: 10px;">
+                
+                <button onclick="updateWifiSettings()" class="btn-primary" style="background-color: #3b82f6; margin-top: 10px;">Send to ESP32</button>
+            </div>
+
+            <button onclick="logout()" class="btn-primary" style="background-color: #ef4444; margin-top: 40px;">Log Out</button>
+
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-inner">
+                <a href="home.html" class="nav-btn"><i class="fa-solid fa-house"></i><span>Home</span></a>
+                <a href="energy.html" class="nav-btn"><i class="fa-solid fa-bolt"></i><span>Energy</span></a>
+                <a href="settings.html" class="nav-btn active"><i class="fa-solid fa-gear"></i><span>Settings</span></a>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
