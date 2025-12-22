@@ -116,13 +116,30 @@ mqttClient.on('message', async (topic, message) => {
 
 // --- MIDDLEWARE ---
 const auth = (req, res, next) => {
-  const token = req.headers['x-access-token'];
-  if (!token) return res.status(401).send("Access Denied");
+  // 1. Try finding the token in the standard "Authorization" header (Google uses this)
+  let token = req.headers['authorization'];
+  
+  if (token && token.startsWith('Bearer ')) {
+      // Remove "Bearer " prefix to get just the token string
+      token = token.slice(7, token.length);
+  } 
+  // 2. If not found, try the custom header (Your App uses this)
+  else if (req.headers['x-access-token']) {
+      token = req.headers['x-access-token'];
+  }
+
+  // 3. If no token found in either place, reject
+  if (!token) {
+      console.log("Auth Failed: No token provided");
+      return res.status(401).send("Access Denied");
+  }
+
   try {
     const verified = jwt.verify(token, process.env.JWT_SECRET);
     req.user = verified;
     next();
   } catch (err) {
+    console.log("Auth Failed: Invalid Token");
     res.status(400).send("Invalid Token");
   }
 };
