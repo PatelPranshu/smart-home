@@ -390,7 +390,8 @@ app.get('/api/history', auth, async (req, res) => {
 // ==========================================
 
 const appSmartHome = smarthome({
-  jwt: require('./smart-home-key.json') // (Optional: Only needed if you want "Report State" later)
+  // jwt: require('./smart-home-key.json') // (Optional: Only needed if you want "Report State" later)
+  jwt: process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : require('./smart-home-key.json')
 });
 
 // 1. OAUTH: Authorization Page
