@@ -8,6 +8,7 @@ const cors = require('cors');
 const User = require('./models/User');
 const Device = require('./models/Device');
 const History = require('./models/History');
+const { smarthome } = require('actions-on-google');
 
 const app = express();
 
@@ -24,6 +25,12 @@ app.use(express.json());
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
   .catch(err => console.error(err));
+
+
+  // Enable parsing form data for the login page
+app.use(express.urlencoded({ extended: true }));
+
+
 
 // 2. MQTT Client Setup (Connects to HiveMQ Cloud)
 const mqttClient = mqtt.connect(process.env.MQTT_URL, {
@@ -374,6 +381,210 @@ app.get('/api/history', auth, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch history" });
   }
 });
+
+
+
+
+// ==========================================
+// GOOGLE ASSISTANT INTEGRATION
+// ==========================================
+
+const appSmartHome = smarthome({
+  jwt: require('./smart-home-key.json') // (Optional: Only needed if you want "Report State" later)
+});
+
+// 1. OAUTH: Authorization Page
+// Google opens this URL in a popup on your phone to ask for login.
+app.get('/auth', (req, res) => {
+    const { redirect_uri, state } = req.query;
+    res.send(`
+    <html>
+      <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+        <h2>Link Smart Home</h2>
+        <form action="/login-link" method="post">
+          <input type="hidden" name="redirect_uri" value="${redirect_uri}" />
+          <input type="hidden" name="state" value="${state}" />
+          <input type="email" name="email" placeholder="Email" required style="padding: 10px; margin: 5px;"/><br/>
+          <input type="password" name="password" placeholder="Password" required style="padding: 10px; margin: 5px;"/><br/>
+          <button type="submit" style="padding: 10px 20px; background: #3b82f6; color: white; border: none; margin-top: 10px;">Link Account</button>
+        </form>
+      </body>
+    </html>
+    `);
+});
+
+// 2. OAUTH: Handle Login Form Submission
+app.post('/login-link', async (req, res) => {
+    const { email, password, redirect_uri, state } = req.body;
+    
+    // Check credentials against your Database
+    const user = await User.findOne({ email });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+        return res.send("Invalid credentials. Go back and try again.");
+    }
+
+    // Generate a simple auth code (In a real app, save this to DB with expiry)
+    // We base64 encode the User ID to use as the "code"
+    const authCode = Buffer.from(user._id.toString()).toString('base64');
+    
+    // Redirect back to Google
+    res.redirect(`${redirect_uri}?code=${authCode}&state=${state}`);
+});
+
+// 3. OAUTH: Token Exchange
+// Google swaps the "auth code" for an "access token"
+app.post('/token', async (req, res) => {
+    const { code, grant_type, refresh_token } = req.body;
+    let userId;
+    
+    // If getting a new token
+    if (grant_type === 'authorization_code') {
+        userId = Buffer.from(code, 'base64').toString('ascii'); // Decode User ID
+    } 
+    // If refreshing an old token
+    else if (grant_type === 'refresh_token') {
+        userId = refresh_token;
+    }
+
+    // Create a standard JWT for Google to use in future requests
+    const token = jwt.sign({ id: userId }, process.env.JWT_SECRET);
+
+    res.json({
+        token_type: "Bearer",
+        access_token: token,
+        refresh_token: userId,
+        expires_in: 3600 // 1 hour
+    });
+});
+
+// 4. SMART HOME FULFILLMENT (The Brain)
+// This receives commands like "Turn on the light"
+app.post('/api/smarthome', auth, async (req, res) => {
+    const body = req.body;
+    const userId = req.user.id; // Extracted from the JWT token
+    const requestId = body.requestId;
+    const intent = body.inputs[0].intent;
+
+    console.log(`Google Request: ${intent}`);
+
+    // --- A. SYNC: Google asks "What devices does this user have?" ---
+    if (intent === 'action.devices.SYNC') {
+        const devices = await Device.find({ owner: userId });
+        
+        const payloadDevices = [];
+        devices.forEach(device => {
+            device.switches.forEach(sw => {
+                // Determine Google Device Type
+                let type = 'action.devices.types.SWITCH';
+                if (sw.type === 'light') type = 'action.devices.types.LIGHT';
+                if (sw.type === 'fan') type = 'action.devices.types.FAN';
+                if (sw.type === 'ac') type = 'action.devices.types.AC_UNIT';
+                if (sw.type === 'outlet') type = 'action.devices.types.OUTLET';
+
+                payloadDevices.push({
+                    id: `${device.deviceId}-${sw.id}`, // e.g. "esp32_001-0"
+                    type: type,
+                    traits: [
+                        'action.devices.traits.OnOff' // All your devices support On/Off
+                    ],
+                    name: {
+                        name: sw.name
+                    },
+                    willReportState: false,
+                    deviceInfo: {
+                        manufacturer: 'Smart Home DIY',
+                        model: 'ESP32'
+                    }
+                });
+            });
+        });
+
+        return res.json({
+            requestId: requestId,
+            payload: {
+                agentUserId: userId,
+                devices: payloadDevices
+            }
+        });
+    }
+
+    // --- B. QUERY: Google asks "Is the light on?" ---
+    if (intent === 'action.devices.QUERY') {
+        const requestedDevices = body.inputs[0].payload.devices;
+        const deviceStatus = {};
+
+        for (const d of requestedDevices) {
+            const parts = d.id.split('-'); // ["esp32_001", "0"]
+            const deviceId = parts[0];
+            const switchId = parseInt(parts[1]);
+
+            const dbDevice = await Device.findOne({ deviceId, owner: userId });
+            
+            if (dbDevice) {
+                const sw = dbDevice.switches.find(s => s.id === switchId);
+                deviceStatus[d.id] = {
+                    on: sw ? sw.state : false,
+                    online: dbDevice.isOnline
+                };
+            } else {
+                deviceStatus[d.id] = { online: false };
+            }
+        }
+
+        return res.json({
+            requestId: requestId,
+            payload: { devices: deviceStatus }
+        });
+    }
+
+    // --- C. EXECUTE: Google says "Turn on the light" ---
+    if (intent === 'action.devices.EXECUTE') {
+        const commands = body.inputs[0].payload.commands;
+        const results = [];
+
+        for (const command of commands) {
+            for (const device of command.devices) {
+                for (const execution of command.execution) {
+                    if (execution.command === 'action.devices.commands.OnOff') {
+                        const parts = device.id.split('-');
+                        const deviceId = parts[0];
+                        const switchId = parseInt(parts[1]);
+                        const newState = execution.params.on;
+
+                        // 1. Send Command to ESP32 via MQTT
+                        const mqttPayload = JSON.stringify({ switchId, state: newState });
+                        mqttClient.publish(`devices/${deviceId}/command`, mqttPayload);
+
+                        // 2. Update Database
+                        await Device.updateOne(
+                           { deviceId: deviceId, "switches.id": switchId },
+                           { $set: { "switches.$.state": newState } }
+                        );
+                        
+                        // 3. Log History
+                        // (You can copy the History code from your /control route if you want logging here too)
+
+                        results.push({
+                            ids: [device.id],
+                            status: "SUCCESS",
+                            states: {
+                                on: newState,
+                                online: true
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        return res.json({
+            requestId: requestId,
+            payload: { commands: results }
+        });
+    }
+});
+
+
 
 // ... (Rest of your existing server.js code: /api/devices, /api/control, etc.) ...
 const PORT = process.env.PORT || 3000;
