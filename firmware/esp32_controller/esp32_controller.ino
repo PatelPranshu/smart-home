@@ -2,10 +2,9 @@
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h> 
-#include <Preferences.h> // Library to save data permanently
+#include <Preferences.h> 
 
-// --- DEFAULT CONFIGURATION (Fallback) ---
-// If no WiFi is saved, it will try these:
+// --- CONFIGURATION ---
 const char* default_ssid = "PRANSHU";
 const char* default_password = "123450789";
 
@@ -20,7 +19,7 @@ const char* commandTopic = "devices/esp32_001/command";
 const char* updateTopic = "devices/esp32_001/update";
 const char* syncTopic = "devices/esp32_001/sync";
 const char* statusTopic = "devices/esp32_001/status"; 
-const char* wifiTopic = "devices/esp32_001/wifi"; // NEW TOPIC
+const char* wifiTopic = "devices/esp32_001/wifi"; 
 
 // --- PINS ---
 const int NUM_RELAYS = 8;
@@ -31,69 +30,205 @@ const int STATUS_LED = 2;
 // --- GLOBALS ---
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
-Preferences preferences; // Object to save data
+Preferences preferences; 
 
-// Variables to hold current WiFi Creds
 String currentSSID;
 String currentPass;
 
-// State tracking
+// Switch State Tracking
 bool relayState[NUM_RELAYS] = {false};
 int lastSwitchState[NUM_RELAYS] = {HIGH}; 
 unsigned long lastDebounceTime[NUM_RELAYS] = {0};
 unsigned long debounceDelay = 50;
 
-// TIMERS FOR BACKGROUND TASKS
+// TIMERS
 unsigned long lastWifiAttempt = 0;
 unsigned long lastMqttAttempt = 0;
-const unsigned long wifiInterval = 10000; // Try WiFi every 10s
-const unsigned long mqttInterval = 5000;  // Try MQTT every 5s
+const unsigned long wifiInterval = 10000; 
+const unsigned long mqttInterval = 5000; 
+int wifiRetryCount = 0; // Tracks failed attempts
+int mqttRetryCount = 0; // <--- NEW: Tracks failed MQTT attempts
 
-// --- HELPER: Blink Blue LED (Non-blocking) ---
+// Heartbeat Timer
+unsigned long lastHeartbeat = 0;
+
+// --- LED STATUS VARIABLES ---
+int ledState = LOW;
+unsigned long previousLedMillis = 0;
+unsigned long successStateStart = 0;
+bool isSuccessAnim = false;       
+bool wifiKnownConnected = false;  
+bool mqttKnownConnected = false;  
+
+// Manual Blink Tracking (Non-Blocking)
+unsigned long blinkStartTime = 0;
+bool isBlinking = false;
+const int BLINK_DURATION = 100;
+
+// --- HELPER: Trigger Manual Blink ---
 void blinkFeedback() {
-  digitalWrite(STATUS_LED, HIGH); 
-  delay(10);                      
-  digitalWrite(STATUS_LED, LOW);  
+  digitalWrite(STATUS_LED, HIGH);
+  blinkStartTime = millis();
+  isBlinking = true;
 }
+
+// --- HELPER: Manage All LED Patterns ---
+void handleLedStatus() {
+  unsigned long now = millis();
+  bool currentWifi = (WiFi.status() == WL_CONNECTED);
+  bool currentMqtt = client.connected();
+
+  // 1. Detect Transitions for 2s Success Light
+  if (currentWifi && !wifiKnownConnected) {
+      wifiKnownConnected = true;
+      isSuccessAnim = true;
+      successStateStart = now;
+      digitalWrite(STATUS_LED, HIGH); 
+  }
+  if (!currentWifi) wifiKnownConnected = false;
+
+  if (currentMqtt && !mqttKnownConnected) {
+      mqttKnownConnected = true;
+      isSuccessAnim = true;
+      successStateStart = now;
+      digitalWrite(STATUS_LED, HIGH); 
+  }
+  if (!currentMqtt) mqttKnownConnected = false;
+
+  // 2. Handle LED Priorities
+  
+  // PRIORITY A: Success Animation (2s Solid ON)
+  if (isSuccessAnim) {
+      if (now - successStateStart > 2000) {
+          isSuccessAnim = false;
+          digitalWrite(STATUS_LED, LOW);
+      } else {
+           digitalWrite(STATUS_LED, HIGH); 
+      }
+      return; 
+  }
+
+  // PRIORITY B: WiFi Connecting (Fast Blink - 100ms)
+  if (!currentWifi) {
+      if (now - previousLedMillis >= 100) {
+          previousLedMillis = now;
+          ledState = !ledState;
+          digitalWrite(STATUS_LED, ledState);
+      }
+      return;
+  } 
+  
+  // PRIORITY C: MQTT Connecting (Slow Blink - 300ms)
+  else if (!currentMqtt) {
+      if (now - previousLedMillis >= 300) {
+          previousLedMillis = now;
+          ledState = !ledState;
+          digitalWrite(STATUS_LED, ledState);
+      }
+      return;
+  } 
+  
+  // PRIORITY D: Idle (Manual Switch Feedback)
+  else {
+      if (isBlinking) {
+          if (now - blinkStartTime >= BLINK_DURATION) {
+              digitalWrite(STATUS_LED, LOW);
+              isBlinking = false;
+          }
+      } else {
+         digitalWrite(STATUS_LED, LOW);
+      }
+  }
+}
+
+
+
+// --- MULTITHREADING VARIABLES ---
+TaskHandle_t SwitchTask; 
+bool mqttNeedsUpdate[NUM_RELAYS] = {false}; // Flag to sync Core 0 and Core 1
+
+// --- CORE 0: DEDICATED SWITCH TASK (Runs independently) ---
+void switchTaskCode(void * pvParameters) {
+  for (;;) { // Infinite loop for this core
+    // 1. Check Switches
+    for(int i=0; i<NUM_RELAYS; i++) {
+       int reading = digitalRead(switchPins[i]);
+       
+       if (reading != lastSwitchState[i]) {
+          lastDebounceTime[i] = millis();
+       }
+
+       if ((millis() - lastDebounceTime[i]) > debounceDelay) {
+          static int stableState[NUM_RELAYS] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+          
+          if (reading != stableState[i]) {
+             stableState[i] = reading;
+             blinkFeedback(); // Blink LED
+
+             relayState[i] = !relayState[i];
+             digitalWrite(relayPins[i], relayState[i] ? LOW : HIGH);
+             
+             // Mark this switch as "Needs Update" for the Main Loop to handle
+             mqttNeedsUpdate[i] = true; 
+          }
+       }
+       lastSwitchState[i] = reading;
+    }
+    // Small delay to prevent crashing the CPU Watchdog
+    vTaskDelay(10 / portTICK_PERIOD_MS); 
+  }
+}
+
 
 void setup() {
   Serial.begin(115200);
   
-  // 1. Setup Status LED
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LOW); 
 
-  // 2. Initialize Pins
   for(int i=0; i<NUM_RELAYS; i++) {
     pinMode(relayPins[i], OUTPUT);
-    digitalWrite(relayPins[i], HIGH); // Relays OFF (Active Low)
+    digitalWrite(relayPins[i], HIGH); 
     pinMode(switchPins[i], INPUT_PULLUP);
     lastSwitchState[i] = digitalRead(switchPins[i]);
   }
 
-  // --- 3. LOAD WIFI FROM STORAGE ---
-  preferences.begin("my-app", true); // Open storage in read-only mode first
-  currentSSID = preferences.getString("ssid", default_ssid); // Get saved SSID or use default
+  // --- LOAD WIFI ---
+  preferences.begin("my-app", true); 
+  currentSSID = preferences.getString("ssid", default_ssid); 
   currentPass = preferences.getString("pass", default_password);
   preferences.end();
 
   Serial.println("Loaded Config:");
   Serial.println("SSID: " + currentSSID);
 
-  // 4. JIO DNS FIX
   IPAddress primaryDNS(8, 8, 8, 8);   
   IPAddress secondaryDNS(8, 8, 4, 4); 
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, primaryDNS, secondaryDNS);
+  WiFi.setSleep(false); 
 
-  // 5. Initial WiFi Start (Non-Blocking)
   Serial.println("Starting WiFi...");
   WiFi.begin(currentSSID.c_str(), currentPass.c_str());
-  // We do NOT wait here. We go straight to loop() so switches work immediately.
 
-  // 6. MQTT Config
   espClient.setInsecure(); 
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+  
+  // Fixes for Speed & Stability
+  client.setBufferSize(1024); 
+  client.setKeepAlive(5);
+  client.setSocketTimeout(4);  
+
+  // --- START BACKGROUND TASK FOR SWITCHES (Core 0) ---
+  xTaskCreatePinnedToCore(
+      switchTaskCode,   // Function to run
+      "SwitchTask",     // Name
+      10000,            // Stack size
+      NULL,             // Parameters
+      1,                // Priority
+      &SwitchTask,      // Task Handle
+      0);               // Core ID (0 = Background, 1 = Main Loop)
+      
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -104,24 +239,19 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // --- A. CHECK FOR WIFI UPDATE ---
   if (String(topic) == wifiTopic) {
       Serial.println("New Wi-Fi Credentials Received!");
-      
       StaticJsonDocument<200> doc;
       deserializeJson(doc, message);
-      
       const char* newSSID = doc["ssid"];
       const char* newPass = doc["pass"];
       
       if (newSSID && newPass) {
           Serial.println("Saving and Restarting...");
-          
-          // Save to Flash Memory
-          preferences.begin("my-app", false); // Read-Write mode
+          preferences.begin("my-app", false); 
           preferences.putString("ssid", newSSID);
           preferences.putString("pass", newPass);
           preferences.end();
-          
-          delay(1000); // Small delay to ensure save completes
-          ESP.restart(); // Reboot to apply changes
+          delay(1000); 
+          ESP.restart(); 
       }
       return;
   }
@@ -143,85 +273,130 @@ void callback(char* topic, byte* payload, unsigned int length) {
 // --- BACKGROUND CONNECTION MANAGERS ---
 
 void handleWiFi() {
-  // If connected, do nothing
-  if (WiFi.status() == WL_CONNECTED) return;
+  // 1. If connected, reset counter and exit
+  if (WiFi.status() == WL_CONNECTED) {
+      wifiRetryCount = 0; 
+      return;
+  }
 
-  // If disconnected, only try reconnecting once every 10 seconds
   unsigned long now = millis();
   if (now - lastWifiAttempt > wifiInterval) {
     lastWifiAttempt = now;
-    Serial.println("Reconnecting to WiFi: " + currentSSID);
-    // WiFi.disconnect(); // Optional
+    wifiRetryCount++; 
+
+    Serial.print("Reconnecting to WiFi: ");
+    Serial.print(currentSSID);
+    Serial.print(" (Attempt ");
+    Serial.print(wifiRetryCount);
+    Serial.println("/10)");
+
+    // --- SELF-HEALING LOGIC ---
+    // If failed 5 times, wipe memory and restart to default
+    if (wifiRetryCount >= 10) {
+        Serial.println("\n!!! CONNECTION FAILED REPEATEDLY !!!");
+        Serial.println("Wiping bad Wi-Fi settings and restarting...");
+        
+        preferences.begin("my-app", false); 
+        preferences.clear(); // WIPE ALL SAVED DATA
+        preferences.end();
+        
+        digitalWrite(STATUS_LED, HIGH); delay(100); digitalWrite(STATUS_LED, LOW); delay(100);
+        digitalWrite(STATUS_LED, HIGH); delay(100); digitalWrite(STATUS_LED, LOW);
+        delay(1000);
+        ESP.restart(); 
+    }
+
+    // --- FORCE DISCONNECT & RETRY ---
+    WiFi.disconnect(); 
+    WiFi.mode(WIFI_OFF);   
+    delay(100);            
+    WiFi.mode(WIFI_STA);   
     WiFi.begin(currentSSID.c_str(), currentPass.c_str()); 
   }
 }
 
 void handleMQTT() {
-  // Only try MQTT if WiFi is ready
   if (WiFi.status() != WL_CONNECTED) return;
-  // If already connected, do nothing
-  if (client.connected()) return;
+  // 1. If connected, reset counter and exit
+  if (client.connected()) {
+      mqttRetryCount = 0; // Reset counter on success
+      return; 
+  }
 
-  // If disconnected, try once every 5 seconds
   unsigned long now = millis();
   if (now - lastMqttAttempt > mqttInterval) {
     lastMqttAttempt = now;
-    Serial.println("Attempting MQTT connection...");
-    
+    mqttRetryCount++; // Increment failure counter
+
+    Serial.print("Attempting MQTT connection... (");
+    Serial.print(mqttRetryCount);
+    Serial.println("/5)");
+
+    // --- SELF-HEALING LOGIC (NEW) ---
+    // If MQTT fails 5 times, maybe the network firewall is blocking it or WiFi is "fake" connected.
+    // Wipe settings and restart to Default WiFi.
+    if (mqttRetryCount >= 5) {
+        Serial.println("\n!!! MQTT FAILED REPEATEDLY !!!");
+        Serial.println("Wiping bad Wi-Fi settings and restarting...");
+        
+        preferences.begin("my-app", false); 
+        preferences.clear(); // WIPE ALL SAVED DATA
+        preferences.end();
+        
+        // Visual warning (Fast double blink)
+        digitalWrite(STATUS_LED, HIGH); delay(100); digitalWrite(STATUS_LED, LOW); delay(100);
+        digitalWrite(STATUS_LED, HIGH); delay(100); digitalWrite(STATUS_LED, LOW);
+        delay(1000);
+        ESP.restart(); 
+    }
+
     // Attempt connection
-    if (client.connect(deviceId, mqtt_user, mqtt_pass, statusTopic, 0, true, "offline")) {
+    String randomClientId = String(deviceId) + "-" + String(random(0xffff), HEX);
+
+    if (client.connect(randomClientId.c_str(), mqtt_user, mqtt_pass, statusTopic, 0, true, "offline")) {
       Serial.println("MQTT Connected");
+      mqttRetryCount = 0; // <--- IMPORTANT: Reset counter on success
+      
       client.publish(statusTopic, "online", true);
       client.subscribe(commandTopic);
-      client.subscribe(wifiTopic); // <--- SUBSCRIBE TO WIFI UPDATES
+      client.subscribe(wifiTopic); 
       client.publish(syncTopic, "1"); 
-      
-      // Quick double blink for success
-      digitalWrite(STATUS_LED, HIGH); delay(50); digitalWrite(STATUS_LED, LOW);
-      delay(50);
-      digitalWrite(STATUS_LED, HIGH); delay(50); digitalWrite(STATUS_LED, LOW);
+    } else {
+      Serial.print("Failed, rc=");
+      Serial.println(client.state());
     }
   }
 }
-
 void loop() {
-  // --- 1. PRIORITY: MANUAL SWITCHES (Runs continuously) ---
-  for(int i=0; i<NUM_RELAYS; i++) {
-     int reading = digitalRead(switchPins[i]);
-     
-     if (reading != lastSwitchState[i]) {
-        lastDebounceTime[i] = millis();
-     }
+  // --- 1. HANDLE LED STATUS ---
+  handleLedStatus();
 
-     if ((millis() - lastDebounceTime[i]) > debounceDelay) {
-        static int stableState[NUM_RELAYS] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
-        
-        if (reading != stableState[i]) {
-           stableState[i] = reading;
-           blinkFeedback(); 
-
-           relayState[i] = !relayState[i];
-           digitalWrite(relayPins[i], relayState[i] ? LOW : HIGH);
-           
-           // Only send to server if connected (Prevents lag)
-           if (client.connected()) {
-             StaticJsonDocument<200> doc;
-             doc["switchId"] = i;
-             doc["state"] = relayState[i];
-             char buffer[256];
-             serializeJson(doc, buffer);
-             client.publish(updateTopic, buffer);
-           }
-        }
-     }
-     lastSwitchState[i] = reading;
-  }
-
-  // --- 2. BACKGROUND TASKS ---
-  handleWiFi(); // Check WiFi status every 10s
-  handleMQTT(); // Check MQTT status every 5s
-  
+  // --- 2. HANDLE MQTT UPDATES ---
   if (client.connected()) {
-    client.loop(); // Handle incoming MQTT messages
+      for(int i=0; i<NUM_RELAYS; i++) {
+          if (mqttNeedsUpdate[i]) {
+              mqttNeedsUpdate[i] = false; 
+              StaticJsonDocument<200> doc;
+              doc["switchId"] = i;
+              doc["state"] = relayState[i];
+              char buffer[256];
+              serializeJson(doc, buffer);
+              client.publish(updateTopic, buffer);
+          }
+      }
+      
+      // --- NEW: HEARTBEAT (Fixes "Offline" Status Bug) ---
+      // Every 30 seconds, force-tell the server "I AM ONLINE"
+      if (millis() - lastHeartbeat > 30000) {
+         lastHeartbeat = millis();
+         client.publish(statusTopic, "online", true);
+         Serial.println("Sent Heartbeat: Online");
+      }
+      
+      client.loop(); 
   }
+
+  // --- 3. CONNECTION MANAGEMENT ---
+  handleWiFi(); 
+  handleMQTT(); 
 }

@@ -17,31 +17,41 @@
 
         <div class="content-area" style="padding-top: 20px;">
             
-            <div class="settings-card">
-                <h3><i class="fa-solid fa-user"></i> Account</h3>
-                <p id="user-email-display" style="color: #666; margin-bottom: 10px;">Loading...</p>
+            <div class="settings-group">
+                <h3 class="group-title">Account</h3>
                 
-                <label>Change Password</label>
-                <input type="password" id="new-password" placeholder="New Password" class="input-field">
-                <button onclick="updateUserAccount()" class="btn-primary" style="margin-top: 10px;">Update Account</button>
+                <div class="settings-card profile-card">
+                    <div class="profile-icon">
+                        <i class="fa-solid fa-user"></i>
+                    </div>
+                    <div class="profile-info">
+                        <span id="username-display" class="username">Loading...</span>
+                        <span class="role">Admin</span>
+                    </div>
+                </div>
+
+                <button class="settings-btn" onclick="openVerifyCodeModal()">
+                    <div class="btn-text">
+                        <i class="fa-solid fa-lock"></i>
+                        <span>Change Account Password</span>
+                    </div>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
             </div>
 
-            <div class="settings-card" style="margin-top: 20px;">
-                <h3><i class="fa-solid fa-wifi"></i> Device Wi-Fi</h3>
-                <p style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">Select a device to update its Wi-Fi credentials.</p>
+            <div class="settings-group" style="margin-top: 25px;">
+                <h3 class="group-title">Device Settings</h3>
                 
-                <select id="device-select" class="input-field">
-                    <option>Loading devices...</option>
-                </select>
-
-                <input type="text" id="wifi-ssid" placeholder="New SSID" class="input-field" style="margin-top: 10px;">
-                <input type="text" id="wifi-pass" placeholder="New Password" class="input-field" style="margin-top: 10px;">
-                
-                <button onclick="updateWifiSettings()" class="btn-primary" style="background-color: #3b82f6; margin-top: 10px;">Send to ESP32</button>
+                <button class="settings-btn" onclick="openVerifyPassModal()">
+                    <div class="btn-text">
+                        <i class="fa-solid fa-wifi"></i>
+                        <span>Change Wi-Fi ID/Password</span>
+                    </div>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
             </div>
 
-            <button onclick="logout()" class="btn-primary" style="background-color: #ef4444; margin-top: 40px;">Log Out</button>
-
+            <button onclick="logout()" class="btn-primary logout-btn">Log Out</button>
         </div>
 
         <div class="bottom-nav">
@@ -52,6 +62,64 @@
             </div>
         </div>
     </div>
+
+    <div id="modal-verify-code" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Security Check</h3>
+                <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p style="margin-bottom:15px; color:#666; font-size:0.9rem;">Please enter the unique code printed on your ESP32 device.</p>
+            
+            <input type="text" id="input-esp-code" placeholder="Enter ESP32 Code" class="input-field">
+            <button onclick="verifyEspCode()" class="btn-primary" style="margin-top:10px;">Verify</button>
+        </div>
+    </div>
+
+    <div id="modal-change-pass" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>New Password</h3>
+                <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <input type="password" id="input-new-pass" placeholder="New Password" class="input-field">
+            <button onclick="submitNewPassword()" class="btn-primary" style="margin-top:10px;">Update</button>
+        </div>
+    </div>
+
+    <div id="modal-verify-pass" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Verify Identity</h3>
+                <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p style="margin-bottom:15px; color:#666; font-size:0.9rem;">Enter your login password to access Wi-Fi settings.</p>
+            
+            <input type="password" id="input-user-pass" placeholder="Your Password" class="input-field">
+            <button onclick="verifyUserPass()" class="btn-primary" style="margin-top:10px;">Verify</button>
+        </div>
+    </div>
+
+    <div id="modal-wifi-settings" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Update Wi-Fi</h3>
+                <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <label>Select Device</label>
+            <select id="device-select" class="input-field" style="margin-bottom:10px;">
+                <option>Loading...</option>
+            </select>
+
+            <label>New Credentials</label>
+            <input type="text" id="wifi-ssid" placeholder="New Wi-Fi Name" class="input-field" style="margin-bottom:10px;">
+            <input type="text" id="wifi-pass" placeholder="New Wi-Fi Password" class="input-field">
+            
+            <button onclick="submitWifiSettings()" class="btn-primary" style="background-color:#3b82f6; margin-top:15px;">Update Device</button>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

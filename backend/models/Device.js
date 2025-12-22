@@ -5,6 +5,7 @@ const DeviceSchema = new mongoose.Schema({
   secret: { type: String, required: true },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   isOnline: { type: Boolean, default: false }, // <--- NEW FIELD
+  secretCode: { type: String, default: '123456' },
   switches: [{
     id: Number,
     name: String,

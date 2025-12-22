@@ -6,10 +6,55 @@
 // const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 //     ? 'http://localhost:3000/api'
 //     : 'https://smarthome-backend-rbmc.onrender.com/api';
-const API_URL = 'https://smarthome-backend-rbmc.onrender.com/api';
+// const API_URL = 'https://smarthome-backend-rbmc.onrender.com/api';
+const API_URL = 'http://localhost:3000/api';
 // Global State
 const token = localStorage.getItem('token');
 const path = window.location.pathname;
+
+// ==========================================
+// 0. TOAST NOTIFICATION SYSTEM (New)
+// ==========================================
+// Inject Styles dynamically
+const style = document.createElement('style');
+style.innerHTML = `
+  .toast-container { position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 10px; }
+  .toast { min-width: 250px; padding: 16px; border-radius: 12px; background: white; box-shadow: 0 5px 15px rgba(0,0,0,0.15); display: flex; align-items: center; animation: slideIn 0.3s ease; border-left: 6px solid #333; font-family: 'Inter', sans-serif; font-size: 0.95rem; font-weight: 500; }
+  .toast.success { border-color: #22c55e; } .toast.success i { color: #22c55e; }
+  .toast.error { border-color: #ef4444; } .toast.error i { color: #ef4444; }
+  .toast.warning { border-color: #f59e0b; } .toast.warning i { color: #f59e0b; }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+`;
+document.head.appendChild(style);
+
+function showToast(message, type = 'info') {
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    // Icons based on type
+    let icon = 'fa-circle-info';
+    if(type === 'success') icon = 'fa-circle-check';
+    if(type === 'error') icon = 'fa-circle-exclamation';
+    if(type === 'warning') icon = 'fa-triangle-exclamation';
+
+    toast.innerHTML = `<i class="fa-solid ${icon}" style="margin-right:12px; font-size:1.3rem;"></i> <span>${message}</span>`;
+    container.appendChild(toast);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
 
 // Shared Icon Mapping
 const typeIcons = {
@@ -93,9 +138,10 @@ function initLogin() {
 
             if (data.token) {
                 localStorage.setItem('token', data.token);
+                localStorage.setItem('userEmail', body.email);
                 window.location.href = 'home.html';
             } else if (data.status === 'ok') {
-                alert("Account created! Please log in.");
+                showToast("Account created! Please log in.", "success");
                 window.toggleAuth('login');
             } else {
                 authMsg.innerText = data.error || "Error";
@@ -130,15 +176,26 @@ function initHome() {
     window.openModal = (deviceId, switchId, name, type) => {
         window.currentDeviceId = deviceId;
         window.currentSwitchId = switchId;
-        window.selectedType = type || 'light';
+        
+        // 1. Force Lowercase to match HTML attributes
+        window.selectedType = (type || 'light').toLowerCase(); 
 
         document.getElementById('edit-name').value = name;
         document.getElementById('timer-hrs').value = "";
         document.getElementById('timer-mins').value = "";
 
-        // Highlight Icon
+        // 2. Clear old selection
         document.querySelectorAll('.type-option').forEach(el => el.classList.remove('selected'));
-        const activeOption = document.querySelector(`.type-option[data-type="${window.selectedType}"]`);
+
+        // 3. Find and Highlight the correct icon
+        let activeOption = document.querySelector(`.type-option[data-type="${window.selectedType}"]`);
+        
+        // Safety Fallback: If type not found (e.g. 'unknown'), select 'light' by default
+        if (!activeOption) {
+             window.selectedType = 'light';
+             activeOption = document.querySelector(`.type-option[data-type="light"]`);
+        }
+
         if (activeOption) activeOption.classList.add('selected');
 
         document.getElementById('edit-modal').classList.remove('hidden');
@@ -169,13 +226,13 @@ function initHome() {
             });
             window.closeModal();
             fetchDevices();
-        } catch (err) { alert("Failed to save"); }
+        } catch (err) { showToast("Failed to save changes", "error"); }
     };
 
     window.setTimer = async () => {
         const hrs = parseInt(document.getElementById('timer-hrs').value) || 0;
         const mins = parseInt(document.getElementById('timer-mins').value) || 0;
-        if (hrs === 0 && mins === 0) return alert("Enter time");
+        if (hrs === 0 && mins === 0) return showToast("Please enter a valid time", "warning");
 
         try {
             await fetch(`${API_URL}/timer`, {
@@ -189,7 +246,7 @@ function initHome() {
             });
             window.closeModal();
             fetchDevices();
-        } catch (err) { alert("Failed to set timer"); }
+        } catch (err) { { showToast("Failed to set timer", "error"); } }
     };
 }
 
@@ -202,66 +259,60 @@ async function initEnergy() {
     
     async function loadHistory() {
         try {
-            const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
-            const devices = await res.json();
+            // Fetch real history logs from backend
+            const res = await fetch(`${API_URL}/history?t=${Date.now()}`, { 
+                headers: { 'x-access-token': token },
+                cache: 'no-store'
+            });
+            const logs = await res.json();
             
-            list.innerHTML = ''; // Clear loading text
+            list.innerHTML = ''; 
 
-            devices.forEach(device => {
-                device.switches.forEach(sw => {
-                    const item = document.createElement('div');
-                    item.className = 'history-item'; // Defined in CSS
-                    
-                    // Logic for time display
-                    let timeStr = "No recent activity";
-                    if (sw.state) {
-                         // If ON, show runtime
-                         if(sw.lastOnTime) {
-                            const diff = Math.floor((new Date() - new Date(sw.lastOnTime))/60000);
-                            timeStr = `Running for ${diff} mins`;
-                         }
-                    } else {
-                        // If OFF, check if it was on recently
-                        if(sw.lastOnTime) {
-                            timeStr = `Last used: ${new Date(sw.lastOnTime).toLocaleTimeString()}`;
-                        }
-                    }
+            if (logs.length === 0) {
+                list.innerHTML = '<p style="text-align:center; color:#999; margin-top:20px;">No activity in the last 24 hours.</p>';
+                return;
+            }
 
-                    // Check for active timer
-                    let timerBadge = "";
-                    if(sw.state && sw.timerExpiresAt) {
-                        const timeLeft = Math.ceil((new Date(sw.timerExpiresAt) - new Date())/60000);
-                        if(timeLeft > 0) timerBadge = `<span style="font-size:0.7rem; background:#fef08a; padding:2px 6px; border-radius:4px; color:#854d0e;">Turns off in ${timeLeft}m</span>`;
-                    }
+            logs.forEach(log => {
+                const item = document.createElement('div');
+                item.className = 'history-item';
+                
+                // Format Date (e.g., "10:30 AM")
+                const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const dateStr = new Date(log.timestamp).toLocaleDateString();
 
-                    item.innerHTML = `
-                        <div style="display:flex; align-items:center; gap:15px;">
-                            <div class="device-icon" style="width:40px; height:40px; font-size:1.2rem; display:flex; align-items:center; justify-content:center; background:#f3f4f6; border-radius:50%;">
-                                <i class="fa-solid ${typeIcons[sw.type || 'light']}"></i>
-                            </div>
-                            <div>
-                                <div style="font-weight:600; color:#333;">${sw.name}</div>
-                                <div style="font-size:0.8rem; color:#666;">${timeStr}</div>
-                                ${timerBadge}
-                            </div>
+                // Determine Color (Green for ON, Red for OFF)
+                const isOne = log.action.includes("ON");
+                const color = isOne ? '#22c55e' : '#ef4444';
+                const icon = isOne ? 'fa-toggle-on' : 'fa-toggle-off';
+
+                item.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:15px;">
+                        <div style="width:40px; height:40px; background:#f3f4f6; border-radius:50%; display:flex; align-items:center; justify-content:center; color:${color}; font-size:1.2rem;">
+                            <i class="fa-solid ${icon}"></i>
                         </div>
-                        <div style="font-weight:700; color:${sw.state ? '#22c55e' : '#ef4444'};">
-                            ${sw.state ? 'ON' : 'OFF'}
+                        <div>
+                            <div style="font-weight:600; color:#333;">${log.switchName}</div>
+                            <div style="font-size:0.8rem; color:#666;">${log.action}</div>
                         </div>
-                    `;
-                    item.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);";
-                    list.appendChild(item);
-                });
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-weight:700; font-size:0.9rem; color:#333;">${timeStr}</div>
+                        <div style="font-size:0.7rem; color:#9ca3af;">${dateStr}</div>
+                    </div>
+                `;
+                item.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);";
+                list.appendChild(item);
             });
 
         } catch(err) {
+            console.error(err);
             list.innerText = "Failed to load history.";
         }
     }
 
     loadHistory();
-    // Refresh history every 5 seconds
-    setInterval(loadHistory, 5000); 
+    setInterval(loadHistory, 5000); // Refresh every 5s
 }
 
 
@@ -269,70 +320,141 @@ async function initEnergy() {
 // 5. PAGE: SETTINGS (settings.html)
 // ==========================================
 async function initSettings() {
-    // 1. Load User Info (Simulated)
-    document.getElementById('user-email-display').innerText = "Logged In User"; 
+    // 1. Load User Info
+    // You might need an endpoint like /api/me to get the email, or store it in localStorage on login
+    const userEmail = localStorage.getItem('userEmail') || "User"; 
+    document.getElementById('username-display').innerText = userEmail;
 
-    // 2. Populate Device Dropdown
-    const select = document.getElementById('device-select');
-    try {
-        const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
-        const devices = await res.json();
-        
-        select.innerHTML = '';
-        if(devices.length === 0) {
-            select.innerHTML = '<option>No devices found</option>';
-        }
-        devices.forEach(d => {
-            const opt = document.createElement('option');
-            opt.value = d.deviceId;
-            opt.innerText = `ESP32 Device (${d.deviceId})`;
-            select.appendChild(opt);
-        });
-    } catch(err) {
-        select.innerHTML = '<option>Error loading devices</option>';
-    }
+    // --- HELPER: Close all modals ---
+    window.closeModals = () => {
+        document.querySelectorAll('.modal-overlay').forEach(el => el.classList.add('hidden'));
+    };
 
-    // 3. Settings Actions
-    window.updateUserAccount = async () => {
-        const newPass = document.getElementById('new-password').value;
-        if(!newPass) return alert("Please enter a new password");
-        
+    // --- FLOW 1: CHANGE PASSWORD (ESP CODE CHECK) ---
+    
+    window.openVerifyCodeModal = () => {
+        document.getElementById('input-esp-code').value = "";
+        document.getElementById('modal-verify-code').classList.remove('hidden');
+    };
+
+    window.verifyEspCode = async () => {
+        const code = document.getElementById('input-esp-code').value;
+        if (!code) return showToast("Please enter the code.", "warning");
+
+        try {
+            const res = await fetch(`${API_URL}/verify-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ code })
+            });
+
+            if (res.ok) {
+                window.closeModals();
+                document.getElementById('modal-change-pass').classList.remove('hidden'); // Show next step
+            } else {
+                showToast("Invalid ESP32 Kit Code", "error");
+            }
+        } catch (err) {showToast("Verification Error", "error"); }
+    };
+
+    window.submitNewPassword = async () => {
+        const newPass = document.getElementById('input-new-pass').value;
+        if (!newPass) return showToast("Please enter a new password", "warning");
+
         try {
             const res = await fetch(`${API_URL}/user-update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-                body: JSON.stringify({ password: newPass }) // Backend handles finding user by Token
+                body: JSON.stringify({ password: newPass })
             });
-            if(res.ok) {
-                alert("Password updated! Please log in again.");
+            if (res.ok) {
+                showToast("Password Updated! Logging out...", "success");
                 logout();
             } else {
-                alert("Update failed.");
+                showToast("Failed to update password", "error");
             }
-        } catch(err) { alert("Server Error"); }
+        } catch (err) { showToast("An error occurred", "error"); }
     };
 
-    window.updateWifiSettings = async () => {
+
+    // --- FLOW 2: CHANGE WI-FI (USER PASS CHECK) ---
+
+    window.openVerifyPassModal = () => {
+        document.getElementById('input-user-pass').value = "";
+        document.getElementById('modal-verify-pass').classList.remove('hidden');
+    };
+
+    window.verifyUserPass = async () => {
+        const password = document.getElementById('input-user-pass').value;
+        if (!password) return showToast("Please enter your password", "warning");
+
+        try {
+            const res = await fetch(`${API_URL}/verify-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ password })
+            });
+
+            if (res.ok) {
+                window.closeModals();
+                await loadDevicesForWifi(); // Fetch devices only after verification
+                document.getElementById('modal-wifi-settings').classList.remove('hidden'); // Show next step
+            } else {
+                showToast("Incorrect Password", "error");
+            }
+        } catch (err) { showToast("Verification Error", "error"); }
+    };
+
+    async function loadDevicesForWifi() {
+        const select = document.getElementById('device-select');
+        select.innerHTML = '<option>Loading...</option>';
+        try {
+            const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
+            const devices = await res.json();
+            select.innerHTML = '';
+            devices.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.deviceId;
+                opt.innerText = `Device: ${d.deviceId}`;
+                select.appendChild(opt);
+            });
+        } catch (err) { select.innerHTML = '<option>Error</option>'; }
+    }
+
+    window.submitWifiSettings = async () => {
         const deviceId = document.getElementById('device-select').value;
         const ssid = document.getElementById('wifi-ssid').value;
         const pass = document.getElementById('wifi-pass').value;
 
-        if(!ssid || !pass) return alert("Enter SSID and Password");
-        if(!confirm("Device will restart. Continue?")) return;
+        if (!ssid || !pass) return showToast("Please fill all fields", "warning");
+
+        // --- CHANGE: Removed confirm() popup ---
+        // Instead, we just notify the user that the process has started
+        showToast("Sending configuration... Device will restart shortly.", "info");
 
         try {
-            const res = await fetch(`${API_URL}/wifi-config`, {
+            await fetch(`${API_URL}/wifi-config`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
                 body: JSON.stringify({ deviceId, ssid, pass })
             });
-            const data = await res.json();
-            if(res.ok) alert("Wi-Fi credentials sent!");
-            else alert("Error: " + data.error);
-        } catch(err) { alert("Failed to send"); }
+            
+            // Wait a moment before closing so user sees the "Info" toast first
+            setTimeout(() => {
+                showToast("Wi-Fi Update Sent!", "success");
+                window.closeModals();
+            }, 1000);
+
+        } catch (err) { 
+            showToast("Failed to send Wi-Fi settings", "error"); 
+        }
     };
 }
 
+
+// ==========================================
+// 6. SHARED HELPERS (Used by Home & Energy)
+// ==========================================
 
 // ==========================================
 // 6. SHARED HELPERS (Used by Home & Energy)
@@ -344,7 +466,14 @@ async function fetchDevices() {
     if (!grid) return; // Safety check
 
     try {
-        const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
+        // --- FIX: Prevent Browser Caching ---
+        // 1. Add unique timestamp query (?t=...)
+        // 2. Add cache: 'no-store' option
+        const res = await fetch(`${API_URL}/devices?t=${Date.now()}`, { 
+            headers: { 'x-access-token': token },
+            cache: 'no-store'
+        });
+        
         const devices = await res.json();
         renderGrid(devices);
     } catch (err) { console.error("Fetch error", err); }
@@ -480,8 +609,8 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
             if(statusText) { statusText.classList.replace('text-on', 'text-off'); statusText.innerText = "OFF"; }
         }
     } catch (err) {
-        if (err.name === 'AbortError') alert("Timeout. Device may be offline.");
-        else alert("Connection Failed.");
+        if (err.name === 'AbortError') showToast("Timeout. Device may be offline.", "warning");
+        else showToast("Connection Failed", "error");
     } finally {
         cardElement.classList.remove('card-loading');
         setTimeout(fetchDevices, 1000);

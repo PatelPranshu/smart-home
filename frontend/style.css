@@ -408,3 +408,64 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
 }
 .settings-card h3 { font-size: 1.1rem; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; color: #333; }
 
+/* --- SETTINGS PAGE STYLES --- */
+.group-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-sub);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.profile-card {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 15px;
+    background: white;
+    padding: 20px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+}
+
+.profile-icon {
+    width: 50px; height: 50px;
+    background: #eff6ff;
+    color: var(--primary-color);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.5rem;
+}
+
+.profile-info { display: flex; flex-direction: column; }
+.username { font-weight: 700; font-size: 1.1rem; color: var(--text-main); }
+.role { font-size: 0.8rem; color: var(--text-sub); }
+
+.settings-btn {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: white;
+    border: none;
+    padding: 18px;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    box-shadow: var(--shadow-soft);
+    transition: 0.2s;
+    margin-bottom: 10px;
+}
+.settings-btn:active { transform: scale(0.98); }
+
+.btn-text { display: flex; align-items: center; gap: 12px; font-weight: 600; color: #333; }
+.btn-text i { color: var(--primary-color); font-size: 1.1rem; }
+.settings-btn .fa-chevron-right { color: #ccc; font-size: 0.9rem; }
+
+.logout-btn {
+    background-color: #fee2e2;
+    color: #ef4444;
+    margin-top: 30px;
+}
+.logout-btn:hover { background-color: #fecaca; }
+
