@@ -396,8 +396,17 @@ const appSmartHome = smarthome({
 
 // 1. OAUTH: Authorization Page
 // Google opens this URL in a popup on your phone to ask for login.
+// 1. OAUTH: Authorization Page
 app.get('/auth', (req, res) => {
+    // Debug Log: Check if Google sent the parameters
+    console.log("Only Google should access this. Query Params:", req.query);
+
     const { redirect_uri, state } = req.query;
+
+    if (!redirect_uri || !state) {
+        return res.send("Error: Missing 'redirect_uri'. Do not open this page manually. Please start from the Google Home App.");
+    }
+
     res.send(`
     <html>
       <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -416,19 +425,26 @@ app.get('/auth', (req, res) => {
 
 // 2. OAUTH: Handle Login Form Submission
 app.post('/login-link', async (req, res) => {
+    // Debug Log: Check what the form sent back
+    console.log("Login Attempt Body:", req.body);
+
     const { email, password, redirect_uri, state } = req.body;
     
-    // Check credentials against your Database
-    const user = await User.findOne({ email });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-        return res.send("Invalid credentials. Go back and try again.");
+    // SAFETY CHECK: If redirect_uri is missing, stop here.
+    if (!redirect_uri || redirect_uri === "undefined") {
+        return res.send("Error: Return address lost. Please go back to Google Home App and try again.");
     }
 
-    // Generate a simple auth code (In a real app, save this to DB with expiry)
-    // We base64 encode the User ID to use as the "code"
+    // Check credentials
+    const user = await User.findOne({ email });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+        return res.send("Invalid credentials. Please go back and try again.");
+    }
+
     const authCode = Buffer.from(user._id.toString()).toString('base64');
     
     // Redirect back to Google
+    console.log(`Redirecting to: ${redirect_uri}`);
     res.redirect(`${redirect_uri}?code=${authCode}&state=${state}`);
 });
 
