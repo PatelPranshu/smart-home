@@ -17,17 +17,29 @@ const { smarthome } = require('actions-on-google');
 
 
 const app = express();
+// 0. LOGGING
+app.use(morgan('common'));
 
-// 0. LOGGING (Put this FIRST so it logs everything)
-app.use(morgan('common')); // <--- NEW (Logs IP, Date, Method, URL)
+// 1. TRUST PROXY
+app.set('trust proxy', 1);
 
-// 1. TRUST PROXY (REQUIRED FOR RENDER + RATE LIMIT)
-// 1 means "Trust the first proxy" (Render's Load Balancer)
-app.set('trust proxy', 1); // <--- THIS LINE IS NEW
-// 1. SECURITY HEADERS (Hides "X-Powered-By: Express")
+// --- MOVE CORS HERE (MUST BE BEFORE RATE LIMITERS) ---
+app.use(cors({
+  origin: [
+    // "https://smart-home-lovat.vercel.app", 
+    // "http://localhost:3000",
+    // "http://127.0.0.1:5500",
+    process.env.ORIGIN_URL
+  ].filter(Boolean),
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
+  credentials: true
+}));
+
+// 2. SECURITY HEADERS
 app.use(helmet());
-// 2. GLOBAL LIMITER (Prevent DDoS)
-// Allow 100 requests per 15 minutes per IP
+
+// 3. GLOBAL LIMITER
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 100, 
@@ -35,29 +47,14 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// 3. STRICT LIMITER FOR LOGIN (Prevent Password Guessing)
-// Allow only 5 login attempts per hour
+// 4. STRICT LIMITER FOR LOGIN
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, 
-  max: 5, 
+  max: 5, // Note: Since you are testing, you might want to increase this temporarily to 20
   message: "Too many login attempts. Account locked for 1 hour."
 });
 app.use('/api/login', authLimiter);
-app.use('/api/admin/login', authLimiter); // Protect Admin too
-
-
-// --- CORS CONFIGURATION ---
-app.use(cors({
-  origin: [
-    "https://smart-home-lovat.vercel.app", // <--- Your Vercel Frontend
-    "http://localhost:3000",               // <--- Local Backend testing
-    "http://127.0.0.1:5500",               // <--- Local Frontend (VS Code)
-    process.env.ORIGIN_URL                 // <--- Fallback
-  ].filter(Boolean),
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // <--- Added OPTIONS
-  allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'], // <--- Added Authorization
-  credentials: true // <--- Added for better session handling
-}));
+app.use('/api/admin/login', authLimiter);
 
 app.use(express.json());
 
