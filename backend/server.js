@@ -23,14 +23,8 @@ app.use(morgan('common'));
 // 1. TRUST PROXY
 app.set('trust proxy', 1);
 
-// --- MOVE CORS HERE (MUST BE BEFORE RATE LIMITERS) ---
 app.use(cors({
-  origin: [
-    // "https://smart-home-lovat.vercel.app", 
-    // "http://localhost:3000",
-    // "http://127.0.0.1:5500",
-    process.env.ORIGIN_URL
-  ].filter(Boolean),
+  origin: true, // <--- CHANGE THIS: 'true' means "Allow any origin that asks"
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
   credentials: true
