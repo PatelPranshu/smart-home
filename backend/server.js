@@ -24,9 +24,8 @@ app.use(morgan('common'));
 // 1. TRUST PROXY (Required for Render + Rate Limit)
 app.set('trust proxy', 1); 
 
-// --- CORS CONFIGURATION (UPDATED FOR GOOGLE HOME) ---
-// We set 'origin: true' to allow requests from the Google Home App WebView
-// which often uses dynamic or opaque origins during the linking process.
+// 2. CORS CONFIGURATION (MUST BE TOP LEVEL)
+// We set 'origin: true' to allow dynamic origins from Google Home App WebView
 app.use(cors({
   origin: true, 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -34,10 +33,10 @@ app.use(cors({
   credentials: true
 }));
 
-// 2. SECURITY HEADERS
+// 3. SECURITY HEADERS
 app.use(helmet());
 
-// 3. GLOBAL LIMITER
+// 4. GLOBAL LIMITER
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 100, 
@@ -45,12 +44,13 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// 4. STRICT LIMITER FOR LOGIN
+// 5. STRICT LIMITER FOR LOGIN
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, 
-  max: 20, // Increased slightly for testing purposes
+  max: 20, 
   message: "Too many login attempts. Account locked for 1 hour."
 });
+// Only apply strict limits to the API login, NOT the Google Auth flow
 app.use('/api/login', authLimiter);
 app.use('/api/admin/login', authLimiter);
 
@@ -69,49 +69,45 @@ app.use((req, res, next) => {
 
 app.use(mongoSanitize());
 
-// 1. Database Connection
+// 6. Database Connection
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
   .catch(err => console.error(err));
 
-// Enable parsing form data for the login page
+// 7. Enable parsing form data for the login page
 app.use(express.urlencoded({ extended: true }));
 
 
-// 2. MQTT Client Setup (Connects to HiveMQ Cloud)
+// 8. MQTT Client Setup
 const mqttClient = mqtt.connect(process.env.MQTT_URL, {
   username: process.env.MQTT_USERNAME,
   password: process.env.MQTT_PASSWORD,
-  protocol: 'mqtts' // Secure TLS
+  protocol: 'mqtts' 
 });
 
 mqttClient.on('connect', () => {
   console.log('Backend connected to MQTT Broker');
-  mqttClient.subscribe('devices/+/update'); // Listener for manual flips
-  mqttClient.subscribe('devices/+/sync');   // Listener for reboots
-  mqttClient.subscribe('devices/+/status'); // Listen for Online/Offline
+  mqttClient.subscribe('devices/+/update'); 
+  mqttClient.subscribe('devices/+/sync');   
+  mqttClient.subscribe('devices/+/status'); 
 });
 
-// 3. Handle MQTT Messages
+// 9. Handle MQTT Messages
 mqttClient.on('message', async (topic, message) => {
   const parts = topic.split('/');
   const deviceId = parts[1];
   const type = parts[2]; 
 
-  // CASE A: User flipped physical switch -> Update DB
   if (type === 'update') {
     const data = JSON.parse(message.toString());
     
     let updateFields = { "switches.$.state": data.state };
-    // ... (keep your existing time logic here) ...
 
-    // 1. Update Device State
     await Device.updateOne(
       { deviceId: deviceId, "switches.id": data.switchId },
       { $set: updateFields }
     );
 
-    // 2. CREATE HISTORY LOG
     try {
         const device = await Device.findOne({ deviceId });
         if(device) {
@@ -126,8 +122,6 @@ mqttClient.on('message', async (topic, message) => {
         }
     } catch(err) { console.error("Log Error"); }
   }
-
-  // CASE B: Device Rebooted -> Restore State
   else if (type === 'sync') {
     console.log(`Device ${deviceId} rebooted. Restoring state...`);
     const device = await Device.findOne({ deviceId });
@@ -138,19 +132,13 @@ mqttClient.on('message', async (topic, message) => {
       });
     }
   }
-
-  // CASE C: Device Status Change (Online/Offline)
   if (type === 'status') {
     const status = message.toString().trim();
     const isOnline = status === 'online';
     
-    // 1. Check current status in DB
     const device = await Device.findOne({ deviceId });
-
-    // 2. Only Log & Update if the status is DIFFERENT (reduces spam)
     if (device && device.isOnline !== isOnline) {
         console.log(`Device ${deviceId} is now ${status}`);
-        
         await Device.updateOne(
             { deviceId: deviceId },
             { $set: { isOnline: isOnline } }
@@ -162,19 +150,15 @@ mqttClient.on('message', async (topic, message) => {
 
 // --- MIDDLEWARE ---
 const auth = (req, res, next) => {
-  // 1. Try finding the token in the standard "Authorization" header (Google uses this)
   let token = req.headers['authorization'];
   
   if (token && token.startsWith('Bearer ')) {
-      // Remove "Bearer " prefix to get just the token string
       token = token.slice(7, token.length);
   } 
-  // 2. If not found, try the custom header (Your App uses this)
   else if (req.headers['x-access-token']) {
       token = req.headers['x-access-token'];
   }
 
-  // 3. If no token found in either place, reject
   if (!token) {
       console.log("Auth Failed: No token provided");
       return res.status(401).send("Access Denied");
@@ -192,20 +176,14 @@ const auth = (req, res, next) => {
 
 
 // --- AUTH API ---
-
-// Register
 app.post('/api/register', [
-    // 1. Validation Rules
     body('email').isEmail().normalizeEmail().withMessage('Invalid Email'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 chars long')
 ], async (req, res) => {
-    // 2. Check for Errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ error: errors.array()[0].msg });
     }
-
-    // 3. Proceed
     const { email, password } = req.body;
     const hashedPassword = await bcrypt.hash(password, 10);
     try {
@@ -216,7 +194,6 @@ app.post('/api/register', [
     }
 });
 
-// Login
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
@@ -226,14 +203,11 @@ app.post('/api/login', async (req, res) => {
   if (!valid) return res.status(400).json({ error: 'Invalid password' });
 
   const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
-  
   res.json({ token, role: user.role }); 
 });
 
-// Update User Password/Email
 app.post('/api/user-update', auth, async (req, res) => {
   const { email, password } = req.body;
-  
   try {
       let updates = {};
       if (email) updates.email = email;
@@ -250,14 +224,11 @@ app.post('/api/user-update', auth, async (req, res) => {
 
 
 // --- DEVICE API ---
-
-// Get User's Devices
 app.get('/api/devices', auth, async (req, res) => {
   const devices = await Device.find({ owner: req.user.id });
   res.json(devices);
 });
 
-// Claim a New Device
 app.post('/api/claim-device', auth, async (req, res) => {
     const { deviceId, secretCode } = req.body;
     const userId = req.user.id;
@@ -273,12 +244,9 @@ app.post('/api/claim-device', auth, async (req, res) => {
         if (device.owner) {
             return res.status(400).json({ error: "This device is already registered to another user." });
         }
-
         device.owner = userId;
         device.switches.forEach(sw => sw.state = false); 
         await device.save();
-
-        console.log(`User ${userId} claimed device ${deviceId}`);
         res.json({ status: 'success', message: 'Device successfully added to your account.' });
 
     } catch (err) {
@@ -287,10 +255,8 @@ app.post('/api/claim-device', auth, async (req, res) => {
     }
 });
 
-// Toggle Switch
 app.post('/api/control', auth, async (req, res) => {
   const { deviceId, switchId, state } = req.body;
-  
   const device = await Device.findOne({ deviceId, owner: req.user.id });
   if (!device) return res.status(404).json({ error: "Device not found" });
 
@@ -321,7 +287,6 @@ app.post('/api/control', auth, async (req, res) => {
   res.json({ status: 'sent', state });;
 });
 
-// Edit Device (Name & Icon)
 app.post('/api/edit', auth, async (req, res) => {
   const { deviceId, switchId, newName, newType } = req.body;
   await Device.updateOne(
@@ -332,18 +297,14 @@ app.post('/api/edit', auth, async (req, res) => {
 });
 
 
-// Timer (Auto Turn Off)
 let activeTimers = {}; 
-
 app.post('/api/timer', auth, async (req, res) => {
   const { deviceId, switchId, minutes } = req.body;
   const timerKey = `${deviceId}-${switchId}`;
   
   if (activeTimers[timerKey]) clearTimeout(activeTimers[timerKey]);
-
   const expiryDate = new Date(Date.now() + minutes * 60000);
 
-  // --- 1. TURN ON IMMEDIATELY ---
   const onPayload = JSON.stringify({ switchId, state: true });
   mqttClient.publish(`devices/${deviceId}/command`, onPayload);
 
@@ -357,7 +318,6 @@ app.post('/api/timer', auth, async (req, res) => {
     }
   );
 
-  // --- 2. LOG "TURNED ON" HISTORY ---
   try {
       const device = await Device.findOne({ deviceId });
       if(device) {
@@ -373,9 +333,6 @@ app.post('/api/timer', auth, async (req, res) => {
   } catch(err) { console.error("Timer Start Log Error", err); }
 
   activeTimers[timerKey] = setTimeout(async () => {
-    console.log(`Timer expired! Turning off ${deviceId} switch ${switchId}`);
-    
-    // Turn OFF Logic
     const offPayload = JSON.stringify({ switchId, state: false });
     mqttClient.publish(`devices/${deviceId}/command`, offPayload);
     
@@ -388,8 +345,6 @@ app.post('/api/timer', auth, async (req, res) => {
         } 
       }
     );
-
-    // Log "Turned OFF" History
     try {
         const device = await Device.findOne({ deviceId });
         if(device) {
@@ -403,49 +358,37 @@ app.post('/api/timer', auth, async (req, res) => {
             });
         }
     } catch(err) { console.error("Timer End Log Error", err); }
-    
     delete activeTimers[timerKey];
   }, minutes * 60 * 1000);
 
   res.json({ status: 'timer_set', minutes });
 });
 
-// Wi-Fi Config Update
 app.post('/api/wifi-config', auth, async (req, res) => {
   const { deviceId, ssid, pass } = req.body;
-
   const device = await Device.findOne({ deviceId, owner: req.user.id });
   if (!device) {
       return res.status(404).json({ error: "Device not found or access denied" });
   }
-
   const payload = JSON.stringify({ ssid, pass });
   mqttClient.publish(`devices/${deviceId}/wifi`, payload);
-
-  console.log(`Sending new Wi-Fi creds to ${deviceId}`);
   res.json({ status: 'sent' });
 });
 
 
-// --- NEW VERIFICATION APIs ---
-
-// A. Verify User Password
 app.post('/api/verify-password', auth, async (req, res) => {
     const { password } = req.body;
     try {
         const user = await User.findById(req.user.id);
         if (!user) return res.status(404).json({ error: "User not found" });
-
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) return res.status(400).json({ error: "Incorrect password" });
-
         res.json({ status: 'ok' });
     } catch (err) {
         res.status(500).json({ error: "Verification failed" });
     }
 });
 
-// B. Verify ESP32 Kit Code
 app.post('/api/verify-code', auth, async (req, res) => {
     const { code } = req.body;
     try {
@@ -457,7 +400,6 @@ app.post('/api/verify-code', auth, async (req, res) => {
     }
 });
 
-// Get 24-Hour History
 app.get('/api/history', auth, async (req, res) => {
   try {
     const logs = await History.find({ owner: req.user.id }).sort({ timestamp: -1 });
@@ -483,7 +425,6 @@ const verifyAdmin = async (req, res, next) => {
     }
 };
 
-// 1. Get Dashboard Stats
 app.get('/api/admin/stats', auth, verifyAdmin, async (req, res) => {
     try {
         const totalUsers = await User.countDocuments();
@@ -494,7 +435,6 @@ app.get('/api/admin/stats', auth, verifyAdmin, async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Stats failed" }); }
 });
 
-// 2. List All Devices
 app.get('/api/admin/devices', auth, verifyAdmin, async (req, res) => {
     try {
         const devices = await Device.find().populate('owner', 'email').sort({ _id: -1 });
@@ -502,18 +442,14 @@ app.get('/api/admin/devices', auth, verifyAdmin, async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Fetch failed" }); }
 });
 
-// 3. Create New Device
 app.post('/api/admin/create', auth, verifyAdmin, async (req, res) => {
     const { deviceId, secretCode } = req.body;
-    
     try {
         const existing = await Device.findOne({ deviceId });
         if (existing) return res.status(400).json({ error: "Device ID already exists!" });
-
         const defaultSwitches = Array.from({ length: 8 }, (_, i) => ({
             id: i, name: `Switch ${i + 1}`, state: false, type: 'light'
         }));
-
         const newDevice = await Device.create({
             deviceId,
             secretCode,
@@ -524,7 +460,6 @@ app.post('/api/admin/create', auth, verifyAdmin, async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Creation failed" }); }
 });
 
-// 4. Delete Device
 app.delete('/api/admin/device/:id', auth, verifyAdmin, async (req, res) => {
     try {
         await Device.findOneAndDelete({ deviceId: req.params.id });
@@ -532,7 +467,6 @@ app.delete('/api/admin/device/:id', auth, verifyAdmin, async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Delete failed" }); }
 });
 
-// 5. List Users
 app.get('/api/admin/users', auth, verifyAdmin, async (req, res) => {
     try {
         const users = await User.find().select('-password').sort({ createdAt: -1 });
@@ -542,26 +476,21 @@ app.get('/api/admin/users', auth, verifyAdmin, async (req, res) => {
 
 
 // ==========================================
-// GOOGLE ASSISTANT INTEGRATION
+// GOOGLE ASSISTANT INTEGRATION (FIXED)
 // ==========================================
 
-// Initialize Smart Home SDK
-// Note: While this initialization is here, your implementation below manually handles intents
-// which is perfectly valid and often simpler for custom logic.
 const appSmartHome = smarthome({
   jwt: process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : require('./smart-home-key.json')
 });
 
 // 1. OAUTH: Authorization Page
 app.get('/auth', (req, res) => {
-    // console.log("Google Auth Request:", req.query); // Debug
     const { redirect_uri, state } = req.query;
 
     if (!redirect_uri || !state) {
         return res.send("Error: Missing 'redirect_uri'. Please start from the Google Home App.");
     }
 
-    // Serve a simple HTML login page
     res.send(`
     <html>
       <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -579,12 +508,12 @@ app.get('/auth', (req, res) => {
 });
 
 // 2. OAUTH: Handle Login Form Submission
+// FIX: We must encode the URL parameters to prevent "Nothing happens" error
 app.post('/login-link', async (req, res) => {
-    // console.log("Login Attempt Body:", req.body); // Debug
     const { email, password, redirect_uri, state } = req.body;
     
     if (!redirect_uri || redirect_uri === "undefined") {
-        return res.send("Error: Return address lost. Please go back to Google Home App.");
+        return res.send("Error: Return address lost.");
     }
 
     const user = await User.findOne({ email });
@@ -594,9 +523,11 @@ app.post('/login-link', async (req, res) => {
 
     const authCode = Buffer.from(user._id.toString()).toString('base64');
     
-    // Redirect back to Google with the auth code
-    // console.log(`Redirecting to: ${redirect_uri}`); // Debug
-    res.redirect(`${redirect_uri}?code=${authCode}&state=${state}`);
+    // --- KEY FIX: Encode the components to handle special characters in 'state' ---
+    const finalUrl = `${redirect_uri}?code=${encodeURIComponent(authCode)}&state=${encodeURIComponent(state)}`;
+    
+    console.log(`Redirecting to: ${finalUrl}`);
+    res.redirect(finalUrl);
 });
 
 // 3. OAUTH: Token Exchange
@@ -620,8 +551,7 @@ app.post('/token', async (req, res) => {
     });
 });
 
-// 4. SMART HOME FULFILLMENT (The Brain)
-// Voice -> Google -> This API -> DB & MQTT -> ESP32
+// 4. SMART HOME FULFILLMENT
 app.post('/api/smarthome', auth, async (req, res) => {
     const body = req.body;
     const userId = req.user.id; 
@@ -630,7 +560,6 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
     console.log(`Google Request: ${intent}`);
 
-    // --- A. SYNC: Google asks "What devices does this user have?" ---
     if (intent === 'action.devices.SYNC') {
         const devices = await Device.find({ owner: userId });
         
@@ -648,7 +577,7 @@ app.post('/api/smarthome', auth, async (req, res) => {
                     type: type,
                     traits: [ 'action.devices.traits.OnOff' ],
                     name: { name: sw.name },
-                    willReportState: false, // Set to true if you implement Report State
+                    willReportState: false, 
                     deviceInfo: {
                         manufacturer: 'Smart Home DIY',
                         model: 'ESP32'
@@ -666,7 +595,6 @@ app.post('/api/smarthome', auth, async (req, res) => {
         });
     }
 
-    // --- B. QUERY: Google asks "Is the light on?" ---
     if (intent === 'action.devices.QUERY') {
         const requestedDevices = body.inputs[0].payload.devices;
         const deviceStatus = {};
@@ -695,7 +623,6 @@ app.post('/api/smarthome', auth, async (req, res) => {
         });
     }
 
-    // --- C. EXECUTE: Google says "Turn on the light" ---
     if (intent === 'action.devices.EXECUTE') {
         const commands = body.inputs[0].payload.commands;
         const results = [];
@@ -709,11 +636,9 @@ app.post('/api/smarthome', auth, async (req, res) => {
                         const switchId = parseInt(parts[1]);
                         const newState = execution.params.on;
 
-                        // 1. Send Command to ESP32 via MQTT (Server -> ESP32)
                         const mqttPayload = JSON.stringify({ switchId, state: newState });
                         mqttClient.publish(`devices/${deviceId}/command`, mqttPayload);
 
-                        // 2. Update Database
                         await Device.updateOne(
                            { deviceId: deviceId, "switches.id": switchId },
                            { $set: { "switches.$.state": newState } }
