@@ -339,6 +339,27 @@ app.post('/api/control', auth, async (req, res) => {
       action: state ? "Turned ON (App)" : "Turned OFF (App)"
   });
 
+  // --- NEW: Report State to Google Home (Syncs App) ---
+  try {
+      await appSmartHome.reportState({
+          agentUserId: req.user.id,
+          requestId: Math.random().toString(),
+          payload: {
+              devices: {
+                  states: {
+                      [`${deviceId}-${switchId}`]: {
+                          on: state,
+                          online: true
+                      }
+                  }
+              }
+          }
+      });
+  } catch (err) {
+      console.error("Google Home Report State Failed:", err);
+  }
+  // ----------------------------------------------------
+
   res.json({ status: 'sent', state });;
 });
 
@@ -778,6 +799,24 @@ app.post('/api/smarthome', auth, async (req, res) => {
                            { deviceId: deviceId, "switches.id": switchId },
                            { $set: { "switches.$.state": newState } }
                         );
+                        
+                        // 3. Log History (ADDED)
+                        try {
+                            // Fetch device to get the accurate switch Name
+                            const dbDevice = await Device.findOne({ deviceId });
+                            if (dbDevice) {
+                                const sw = dbDevice.switches.find(s => s.id === switchId);
+                                await History.create({
+                                    owner: userId,
+                                    deviceId: deviceId,
+                                    switchName: sw ? sw.name : `Switch ${switchId}`,
+                                    action: newState ? "Turned ON (Google)" : "Turned OFF (Google)",
+                                    timestamp: new Date()
+                                });
+                            }
+                        } catch (err) {
+                            console.error("History Log Error:", err);
+                        }
                         
                         // 3. Log History
                         // (You can copy the History code from your /control route if you want logging here too)
