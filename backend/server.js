@@ -8,19 +8,62 @@ const cors = require('cors');
 const User = require('./models/User');
 const Device = require('./models/Device');
 const History = require('./models/History');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
+const { body, validationResult } = require('express-validator');
+const morgan = require('morgan');
 const { smarthome } = require('actions-on-google');
 
+
 const app = express();
+
+// 0. LOGGING (Put this FIRST so it logs everything)
+app.use(morgan('common')); // <--- NEW (Logs IP, Date, Method, URL)
+
+// 1. SECURITY HEADERS (Hides "X-Powered-By: Express")
+app.use(helmet());
+// 2. GLOBAL LIMITER (Prevent DDoS)
+// Allow 100 requests per 15 minutes per IP
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, 
+  max: 100, 
+  message: "Too many requests from this IP, please try again later."
+});
+app.use(globalLimiter);
+
+// 3. STRICT LIMITER FOR LOGIN (Prevent Password Guessing)
+// Allow only 5 login attempts per hour
+const authLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, 
+  max: 5, 
+  message: "Too many login attempts. Account locked for 1 hour."
+});
+app.use('/api/login', authLimiter);
+app.use('/api/admin/login', authLimiter); // Protect Admin too
+
 
 // --- CORS CONFIGURATION ---
 app.use(cors({
   origin: process.env.ORIGIN_URL, // Allows localhost, mobile IP, and vercel
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'x-access-token']
+  allowedHeaders: ['Content-Type', 'x-access-token','x-admin-secret']
 }));
 
 app.use(express.json());
 
+// --- FIX START: Patch for Express 5.0 Read-Only Query ---
+app.use((req, res, next) => {
+  Object.defineProperty(req, 'query', {
+    value: req.query,
+    writable: true,
+    configurable: true
+  });
+  next();
+});
+// --- FIX END ---
+
+app.use(mongoSanitize());
 // 1. Database Connection
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
@@ -148,15 +191,26 @@ const auth = (req, res, next) => {
 // --- AUTH API ---
 
 // Register
-app.post('/api/register', async (req, res) => {
-  const { email, password } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  try {
-    const user = await User.create({ email, password: hashedPassword });
-    res.json({ status: 'ok' });
-  } catch (err) {
-    res.status(400).json({ error: 'Email already exists' });
-  }
+app.post('/api/register', [
+    // 1. Validation Rules
+    body('email').isEmail().normalizeEmail().withMessage('Invalid Email'),
+    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 chars long')
+], async (req, res) => {
+    // 2. Check for Errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ error: errors.array()[0].msg });
+    }
+
+    // 3. Proceed (Your existing code)
+    const { email, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    try {
+        const user = await User.create({ email, password: hashedPassword });
+        res.json({ status: 'ok' });
+    } catch (err) {
+        res.status(400).json({ error: 'Email already exists' });
+    }
 });
 
 // Login
@@ -169,7 +223,9 @@ app.post('/api/login', async (req, res) => {
   if (!valid) return res.status(400).json({ error: 'Invalid password' });
 
   const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
-  res.json({ token });
+  
+  // --- CHANGE: Send the role back to the frontend ---
+  res.json({ token, role: user.role }); 
 });
 
 // NEW: Update User Password/Email
@@ -201,6 +257,47 @@ app.post('/api/user-update', auth, async (req, res) => {
 app.get('/api/devices', auth, async (req, res) => {
   const devices = await Device.find({ owner: req.user.id });
   res.json(devices);
+});
+
+// Claim a New Device (The "Sticker" Logic)
+app.post('/api/claim-device', auth, async (req, res) => {
+    const { deviceId, secretCode } = req.body;
+    const userId = req.user.id;
+
+    try {
+        // 1. Find the device
+        // We look for a device that matches the ID and the Secret Code (Sticker)
+        const device = await Device.findOne({ deviceId: deviceId });
+
+        // 2. Security Checks
+        if (!device) {
+            return res.status(404).json({ error: "Device ID not found in system." });
+        }
+
+        // Check if the secret code from the sticker matches the database
+        if (device.secretCode !== secretCode) {
+            return res.status(403).json({ error: "Invalid Secret Code." });
+        }
+
+        // Check if the device is already owned by someone else
+        if (device.owner) {
+            return res.status(400).json({ error: "This device is already registered to another user." });
+        }
+
+        // 3. Claim Success!
+        device.owner = userId;
+        // Optional: Reset switches to default state upon new ownership
+        device.switches.forEach(sw => sw.state = false); 
+        
+        await device.save();
+
+        console.log(`User ${userId} claimed device ${deviceId}`);
+        res.json({ status: 'success', message: 'Device successfully added to your account.' });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Server Error during claiming." });
+    }
 });
 
 // Toggle Switch
@@ -400,6 +497,87 @@ app.get('/api/history', auth, async (req, res) => {
 });
 
 
+
+// ==========================================
+// NEW ADMIN MIDDLEWARE (Role Based)
+// ==========================================
+const verifyAdmin = async (req, res, next) => {
+    try {
+        // 1. req.user.id comes from the previous 'auth' middleware
+        // We fetch the user from DB to ensure the role is current
+        const user = await User.findById(req.user.id);
+
+        // 2. Check if user exists and has role 'admin'
+        if (!user || user.role !== 'admin') {
+            return res.status(403).json({ error: "Access Denied: Admins Only." });
+        }
+
+        // 3. Allowed
+        next();
+    } catch (err) {
+        res.status(500).json({ error: "Server Error Checking Admin" });
+    }
+};
+// 1. Get Dashboard Stats
+app.get('/api/admin/stats', auth, verifyAdmin, async (req, res) => {
+    try {
+        const totalUsers = await User.countDocuments();
+        const totalDevices = await Device.countDocuments();
+        const onlineDevices = await Device.countDocuments({ isOnline: true });
+        const unownedDevices = await Device.countDocuments({ owner: null });
+
+        res.json({ totalUsers, totalDevices, onlineDevices, unownedDevices });
+    } catch (err) { res.status(500).json({ error: "Stats failed" }); }
+});
+
+// 2. List All Devices (With Owner Info)
+app.get('/api/admin/devices', auth, verifyAdmin, async (req, res) => {
+    try {
+        // Populate 'owner' to get the user's email
+        const devices = await Device.find().populate('owner', 'email').sort({ _id: -1 });
+        res.json(devices);
+    } catch (err) { res.status(500).json({ error: "Fetch failed" }); }
+});
+
+// 3. Create New Device (The Factory Process)
+app.post('/api/admin/create', auth, verifyAdmin, async (req, res) => {
+    const { deviceId, secretCode } = req.body;
+    
+    try {
+        const existing = await Device.findOne({ deviceId });
+        if (existing) return res.status(400).json({ error: "Device ID already exists!" });
+
+        // Create with default 8 switches
+        const defaultSwitches = Array.from({ length: 8 }, (_, i) => ({
+            id: i, name: `Switch ${i + 1}`, state: false, type: 'light'
+        }));
+
+        const newDevice = await Device.create({
+            deviceId,
+            secretCode,
+            owner: null,
+            switches: defaultSwitches
+        });
+
+        res.json({ status: 'created', device: newDevice });
+    } catch (err) { res.status(500).json({ error: "Creation failed" }); }
+});
+
+// 4. Delete Device (Cleanup)
+app.delete('/api/admin/device/:id', auth, verifyAdmin, async (req, res) => {
+    try {
+        await Device.findOneAndDelete({ deviceId: req.params.id });
+        res.json({ status: 'deleted' });
+    } catch (err) { res.status(500).json({ error: "Delete failed" }); }
+});
+
+// 5. List Users
+app.get('/api/admin/users', auth, verifyAdmin, async (req, res) => {
+    try {
+        const users = await User.find().select('-password').sort({ createdAt: -1 });
+        res.json(users);
+    } catch (err) { res.status(500).json({ error: "Users failed" }); }
+});
 
 
 // ==========================================
@@ -620,7 +798,6 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
 
 
-// ... (Rest of your existing server.js code: /api/devices, /api/control, etc.) ...
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => { // Listen on all interfaces
     console.log(`🚀 Backend server running at http://localhost:${PORT}`);

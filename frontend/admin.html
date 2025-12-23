@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Smart Home Factory</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    
+    <style>
+        :root { --primary: #2563eb; --bg: #f3f4f6; --text: #1f2937; --card: #ffffff; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding-bottom: 50px; }
+
+        /* HEADER */
+        header { background: #1e293b; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        header h2 { font-size: 1.25rem; }
+        .logout-btn { background: #ef4444; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
+
+        /* AUTH MODAL */
+        #auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1e293b; z-index: 999; display: flex; justify-content: center; align-items: center; }
+        .auth-box { background: white; padding: 2rem; border-radius: 12px; width: 350px; text-align: center; }
+        .auth-box input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; }
+        .auth-box button { width: 100%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; }
+
+        /* CONTAINER */
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+
+        /* STATS GRID */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .stat-card { background: var(--card); padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .stat-val { font-size: 2rem; font-weight: 700; color: var(--primary); }
+        .stat-label { color: #6b7280; font-size: 0.9rem; }
+
+        /* SECTIONS */
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .btn-create { background: #10b981; color: white; border: none; padding: 0.8rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        
+        /* TABLE */
+        .data-table { width: 100%; background: var(--card); border-collapse: collapse; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .data-table th, .data-table td { padding: 1rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        .data-table th { background: #f9fafb; font-weight: 600; color: #374151; }
+        .status-dot { height: 10px; width: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-dot.online { background-color: #22c55e; }
+        .btn-small { padding: 5px 10px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.8rem; margin-right: 5px; }
+        .btn-qr { background: #3b82f6; color: white; }
+        .btn-del { background: #fee2e2; color: #ef4444; }
+
+        /* CREATION MODAL */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 2rem; border-radius: 12px; width: 400px; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+
+        /* QR PRINT AREA */
+        #qr-print-area { display: none; text-align: center; background: white; padding: 20px; border-radius: 10px; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2000; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        .qr-info { margin-top: 10px; font-family: monospace; font-size: 1.2rem; font-weight: bold; }
+        
+        @media print {
+            body * { visibility: hidden; }
+            #qr-print-area, #qr-print-area * { visibility: visible; }
+            #qr-print-area { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-shadow: none; transform: none; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="auth-overlay">
+        <div class="auth-box">
+            <h3>Admin Access</h3>
+            <p style="color:#666; margin-bottom:15px; font-size:0.9rem;">Enter Factory Secret Key</p>
+            <input type="password" id="admin-secret" placeholder="Secret Key">
+            <button onclick="adminLogin()">Enter Dashboard</button>
+        </div>
+    </div>
+
+    <header>
+        <h2>🏭 Smart Home Factory Admin</h2>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </header>
+
+    <div class="container">
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-val" id="val-devices">0</div>
+                <div class="stat-label">Total Devices</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="val-users">0</div>
+                <div class="stat-label">Registered Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="val-online" style="color:#22c55e">0</div>
+                <div class="stat-label">Online Now</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="val-unsold" style="color:#f59e0b">0</div>
+                <div class="stat-label">Unsold Inventory</div>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <h3>Device Inventory</h3>
+            <button class="btn-create" onclick="openCreateModal()">+ Manufacture New Device</button>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Device ID</th>
+                    <th>Secret Code</th>
+                    <th>Owner Email</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="device-table-body">
+                </tbody>
+        </table>
+
+    </div>
+
+    <div id="create-modal" class="modal">
+        <div class="modal-content">
+            <h3>Manufacture Device</h3>
+            <br>
+            <div class="form-group">
+                <label>Device ID (MAC based recommended)</label>
+                <input type="text" id="new-device-id" placeholder="e.g. esp32_A1B2C3...">
+            </div>
+            <div class="form-group">
+                <label>Secret Code (Sticker)</label>
+                <input type="text" id="new-secret-code" value="123456">
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button class="btn-create" onclick="submitCreateDevice()">Create</button>
+                <button class="btn-del" style="background:#ddd; color:#333; padding: 0.8rem;" onclick="closeCreateModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="qr-print-area">
+        <div id="qrcode"></div>
+        <div class="qr-info" id="qr-text"></div>
+        <p style="margin-top:10px; font-size:0.8rem; color:#666;">Scan to Setup</p>
+        <button onclick="window.print()" class="btn-small btn-qr" style="margin-top:15px; padding:8px 15px;">Print Sticker</button>
+        <button onclick="closeQr()" class="btn-small" style="margin-top:15px; background:#ddd; color:#333;">Close</button>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>

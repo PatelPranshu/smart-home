@@ -3,19 +3,16 @@
 // ==========================================
 
 // Determine API URL (Localhost vs Render)
-const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:3000/api'
-    : 'https://smarthome-backend-rbmc.onrender.com/api';
-// const API_URL = 'https://smarthome-backend-rbmc.onrender.com/api';
 // const API_URL = 'http://localhost:3000/api';
+const API_URL = 'https://smarthome-backend-rbmc.onrender.com/api';
+
 // Global State
 const token = localStorage.getItem('token');
 const path = window.location.pathname;
 
 // ==========================================
-// 0. TOAST NOTIFICATION SYSTEM (New)
+// 0. TOAST NOTIFICATION SYSTEM
 // ==========================================
-// Inject Styles dynamically
 const style = document.createElement('style');
 style.innerHTML = `
   .toast-container { position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 10px; }
@@ -38,7 +35,6 @@ function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     
-    // Icons based on type
     let icon = 'fa-circle-info';
     if(type === 'success') icon = 'fa-circle-check';
     if(type === 'error') icon = 'fa-circle-exclamation';
@@ -47,7 +43,6 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `<i class="fa-solid ${icon}" style="margin-right:12px; font-size:1.3rem;"></i> <span>${message}</span>`;
     container.appendChild(toast);
 
-    // Remove after 3 seconds
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transform = 'translateX(100%)';
@@ -68,22 +63,19 @@ const typeIcons = {
     'laundry': 'fa-shirt'
 };
 
-// --- ROUTER: Run code based on current page ---
+// --- ROUTER ---
 document.addEventListener('DOMContentLoaded', () => {
-    
-    // A. Auth Check: Redirect to Login if no token (and not on login page)
+    // Auth Checks
     if (!token && !path.endsWith('index.html') && path !== '/') {
         window.location.href = 'index.html';
         return;
     }
-
-    // B. Auth Check: Redirect to Home if logged in (and on login page)
     if (token && (path.endsWith('index.html') || path === '/')) {
         window.location.href = 'home.html';
         return;
     }
 
-    // C. Initialize Specific Page Logic
+    // Initialize Pages
     if (path.includes('home.html')) initHome();
     if (path.includes('energy.html')) initEnergy();
     if (path.includes('settings.html')) initSettings();
@@ -99,7 +91,6 @@ function initLogin() {
     const regForm = document.getElementById('register-form');
     const authMsg = document.getElementById('auth-msg');
 
-    // Toggle between Login and Register
     window.toggleAuth = (view) => {
         authMsg.classList.add('hidden');
         if (view === 'register') {
@@ -111,7 +102,6 @@ function initLogin() {
         }
     };
 
-    // Handle Login
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const email = document.getElementById('email').value;
@@ -119,7 +109,6 @@ function initLogin() {
         await handleAuth('/login', { email, password });
     });
 
-    // Handle Register
     regForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const email = document.getElementById('reg-email').value;
@@ -137,9 +126,18 @@ function initLogin() {
             const data = await res.json();
 
             if (data.token) {
+                // Save Token
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('userEmail', body.email);
-                window.location.href = 'home.html';
+
+                // --- FIX START: Smart Redirection ---
+                if (data.role === 'admin') {
+                    window.location.href = 'admin.html';
+                } else {
+                    window.location.href = 'home.html';
+                }
+                // --- FIX END ---
+
             } else if (data.status === 'ok') {
                 showToast("Account created! Please log in.", "success");
                 window.toggleAuth('login');
@@ -159,43 +157,32 @@ function initLogin() {
 // 3. PAGE: HOME (home.html)
 // ==========================================
 function initHome() {
-    // 1. Set Date
     const dateOptions = { weekday: 'long', month: 'long', day: 'numeric' };
     document.getElementById('date-display').innerText = new Date().toLocaleDateString('en-US', dateOptions);
 
-    // 2. Start Syncing
     fetchDevices();
-    setInterval(fetchDevices, 2000); // Live update
+    setInterval(fetchDevices, 2000); 
 
-    // --- MODAL VARIABLES ---
     window.currentDeviceId = null;
     window.currentSwitchId = null;
     window.selectedType = 'light';
 
-    // --- MODAL FUNCTIONS (Exposed to window for HTML onclick) ---
     window.openModal = (deviceId, switchId, name, type) => {
         window.currentDeviceId = deviceId;
         window.currentSwitchId = switchId;
-        
-        // 1. Force Lowercase to match HTML attributes
         window.selectedType = (type || 'light').toLowerCase(); 
 
         document.getElementById('edit-name').value = name;
         document.getElementById('timer-hrs').value = "";
         document.getElementById('timer-mins').value = "";
 
-        // 2. Clear old selection
         document.querySelectorAll('.type-option').forEach(el => el.classList.remove('selected'));
-
-        // 3. Find and Highlight the correct icon
-        let activeOption = document.querySelector(`.type-option[data-type="${window.selectedType}"]`);
         
-        // Safety Fallback: If type not found (e.g. 'unknown'), select 'light' by default
+        let activeOption = document.querySelector(`.type-option[data-type="${window.selectedType}"]`);
         if (!activeOption) {
              window.selectedType = 'light';
              activeOption = document.querySelector(`.type-option[data-type="light"]`);
         }
-
         if (activeOption) activeOption.classList.add('selected');
 
         document.getElementById('edit-modal').classList.remove('hidden');
@@ -246,7 +233,7 @@ function initHome() {
             });
             window.closeModal();
             fetchDevices();
-        } catch (err) { { showToast("Failed to set timer", "error"); } }
+        } catch (err) { showToast("Failed to set timer", "error"); }
     };
 }
 
@@ -259,7 +246,6 @@ async function initEnergy() {
     
     async function loadHistory() {
         try {
-            // Fetch real history logs from backend
             const res = await fetch(`${API_URL}/history?t=${Date.now()}`, { 
                 headers: { 'x-access-token': token },
                 cache: 'no-store'
@@ -267,7 +253,6 @@ async function initEnergy() {
             const logs = await res.json();
             
             list.innerHTML = ''; 
-
             if (logs.length === 0) {
                 list.innerHTML = '<p style="text-align:center; color:#999; margin-top:20px;">No activity in the last 24 hours.</p>';
                 return;
@@ -277,11 +262,8 @@ async function initEnergy() {
                 const item = document.createElement('div');
                 item.className = 'history-item';
                 
-                // Format Date (e.g., "10:30 AM")
                 const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const dateStr = new Date(log.timestamp).toLocaleDateString();
-
-                // Determine Color (Green for ON, Red for OFF)
                 const isOne = log.action.includes("ON");
                 const color = isOne ? '#22c55e' : '#ef4444';
                 const icon = isOne ? 'fa-toggle-on' : 'fa-toggle-off';
@@ -305,14 +287,11 @@ async function initEnergy() {
                 list.appendChild(item);
             });
 
-        } catch(err) {
-            console.error(err);
-            list.innerText = "Failed to load history.";
-        }
+        } catch(err) { list.innerText = "Failed to load history."; }
     }
 
     loadHistory();
-    setInterval(loadHistory, 5000); // Refresh every 5s
+    setInterval(loadHistory, 5000);
 }
 
 
@@ -320,18 +299,50 @@ async function initEnergy() {
 // 5. PAGE: SETTINGS (settings.html)
 // ==========================================
 async function initSettings() {
-    // 1. Load User Info
-    // You might need an endpoint like /api/me to get the email, or store it in localStorage on login
     const userEmail = localStorage.getItem('userEmail') || "User"; 
     document.getElementById('username-display').innerText = userEmail;
 
-    // --- HELPER: Close all modals ---
     window.closeModals = () => {
         document.querySelectorAll('.modal-overlay').forEach(el => el.classList.add('hidden'));
     };
 
-    // --- FLOW 1: CHANGE PASSWORD (ESP CODE CHECK) ---
-    
+    // --- FLOW 0: CLAIM DEVICE (NEW ADDITION) ---
+    window.openClaimModal = () => {
+        // Clear previous inputs
+        document.getElementById('claim-id').value = "";
+        document.getElementById('claim-code').value = "";
+        document.getElementById('modal-claim-device').classList.remove('hidden');
+    };
+
+    window.submitClaimDevice = async () => {
+        const deviceId = document.getElementById('claim-id').value.trim();
+        const secretCode = document.getElementById('claim-code').value.trim();
+
+        if (!deviceId || !secretCode) return showToast("Please fill all fields", "warning");
+
+        try {
+            const res = await fetch(`${API_URL}/claim-device`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ deviceId, secretCode })
+            });
+
+            const data = await res.json();
+
+            if (res.ok && data.status === 'success') {
+                showToast("Device Added Successfully!", "success");
+                window.closeModals();
+                // Optional: Refresh list if we were on a page that showed devices
+            } else {
+                showToast(data.error || "Failed to add device", "error");
+            }
+        } catch (err) {
+            showToast("Server Error during Claiming", "error");
+        }
+    };
+
+
+    // --- FLOW 1: CHANGE PASSWORD ---
     window.openVerifyCodeModal = () => {
         document.getElementById('input-esp-code').value = "";
         document.getElementById('modal-verify-code').classList.remove('hidden');
@@ -350,7 +361,7 @@ async function initSettings() {
 
             if (res.ok) {
                 window.closeModals();
-                document.getElementById('modal-change-pass').classList.remove('hidden'); // Show next step
+                document.getElementById('modal-change-pass').classList.remove('hidden'); 
             } else {
                 showToast("Invalid ESP32 Kit Code", "error");
             }
@@ -377,8 +388,7 @@ async function initSettings() {
     };
 
 
-    // --- FLOW 2: CHANGE WI-FI (USER PASS CHECK) ---
-
+    // --- FLOW 2: CHANGE WI-FI ---
     window.openVerifyPassModal = () => {
         document.getElementById('input-user-pass').value = "";
         document.getElementById('modal-verify-pass').classList.remove('hidden');
@@ -397,8 +407,8 @@ async function initSettings() {
 
             if (res.ok) {
                 window.closeModals();
-                await loadDevicesForWifi(); // Fetch devices only after verification
-                document.getElementById('modal-wifi-settings').classList.remove('hidden'); // Show next step
+                await loadDevicesForWifi(); 
+                document.getElementById('modal-wifi-settings').classList.remove('hidden'); 
             } else {
                 showToast("Incorrect Password", "error");
             }
@@ -428,8 +438,6 @@ async function initSettings() {
 
         if (!ssid || !pass) return showToast("Please fill all fields", "warning");
 
-        // --- CHANGE: Removed confirm() popup ---
-        // Instead, we just notify the user that the process has started
         showToast("Sending configuration... Device will restart shortly.", "info");
 
         try {
@@ -439,36 +447,24 @@ async function initSettings() {
                 body: JSON.stringify({ deviceId, ssid, pass })
             });
             
-            // Wait a moment before closing so user sees the "Info" toast first
             setTimeout(() => {
                 showToast("Wi-Fi Update Sent!", "success");
                 window.closeModals();
             }, 1000);
 
-        } catch (err) { 
-            showToast("Failed to send Wi-Fi settings", "error"); 
-        }
+        } catch (err) { showToast("Failed to send Wi-Fi settings", "error"); }
     };
 }
 
 
 // ==========================================
-// 6. SHARED HELPERS (Used by Home & Energy)
+// 6. SHARED HELPERS
 // ==========================================
-
-// ==========================================
-// 6. SHARED HELPERS (Used by Home & Energy)
-// ==========================================
-
 async function fetchDevices() {
-    // Only runs if on Home or Energy page
     const grid = document.getElementById('device-grid');
-    if (!grid) return; // Safety check
+    if (!grid) return; 
 
     try {
-        // --- FIX: Prevent Browser Caching ---
-        // 1. Add unique timestamp query (?t=...)
-        // 2. Add cache: 'no-store' option
         const res = await fetch(`${API_URL}/devices?t=${Date.now()}`, { 
             headers: { 'x-access-token': token },
             cache: 'no-store'
@@ -492,7 +488,6 @@ function renderGrid(devices) {
             const dbType = sw.type || 'light'; 
             const iconClass = typeIcons[dbType] || 'fa-power-off';
 
-            // Time Logic
             let runtimeText = "", timerText = "";
             if (isOnline && sw.state && sw.lastOnTime) {
                 const diffMs = new Date() - new Date(sw.lastOnTime);
@@ -507,7 +502,6 @@ function renderGrid(devices) {
                 }
             }
 
-            // Create Card if missing
             if (!card) {
                 card = document.createElement('div');
                 card.id = domId;
@@ -524,11 +518,9 @@ function renderGrid(devices) {
                 grid.appendChild(card);
             }
 
-            // Update DOM Elements
             const overlay = card.querySelector('.offline-overlay');
             const optionsBtn = card.querySelector('.card-options');
             
-            // Offline/Online Logic
             if (!isOnline) {
                 card.classList.add('device-offline'); 
                 overlay.classList.remove('hidden');   
@@ -541,7 +533,6 @@ function renderGrid(devices) {
                 }
             }
 
-            // Update Button Listener
             if(optionsBtn) {
                 optionsBtn.onclick = (e) => {
                     e.stopPropagation();
@@ -549,7 +540,6 @@ function renderGrid(devices) {
                 };
             }
 
-            // Update UI (Text, Icon, Colors)
             const nameEl = card.querySelector('.device-name');
             if(nameEl) nameEl.innerText = sw.name;
 
@@ -596,7 +586,6 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
         clearTimeout(timeoutId); 
         if (!response.ok) throw new Error("Error");
 
-        // Optimistic Update
         const statusText = cardElement.querySelector('.device-status');
         const iconDiv = cardElement.querySelector('.device-icon');
         if(newState) {

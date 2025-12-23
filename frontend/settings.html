@@ -40,8 +40,16 @@
             </div>
 
             <div class="settings-group" style="margin-top: 25px;">
-                <h3 class="group-title">Device Settings</h3>
+                <h3 class="group-title">Device Management</h3>
                 
+                <button class="settings-btn" onclick="openClaimModal()">
+                    <div class="btn-text">
+                        <i class="fa-solid fa-circle-plus" style="color: #4CAF50;"></i>
+                        <span>Add New Device</span>
+                    </div>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+
                 <button class="settings-btn" onclick="openVerifyPassModal()">
                     <div class="btn-text">
                         <i class="fa-solid fa-wifi"></i>
@@ -63,13 +71,31 @@
         </div>
     </div>
 
+    <div id="modal-claim-device" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Add Device</h3>
+                <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p style="margin-bottom:15px; color:#666; font-size:0.9rem;">Enter the details found on the device sticker.</p>
+            
+            <label style="font-size:0.8rem; font-weight:600; color:#444;">Device ID</label>
+            <input type="text" id="claim-id" placeholder="e.g. esp32_C0..." class="input-field" style="margin-bottom:10px;">
+            
+            <label style="font-size:0.8rem; font-weight:600; color:#444;">Secret Code</label>
+            <input type="text" id="claim-code" placeholder="e.g. 123456" class="input-field">
+            
+            <button onclick="submitClaimDevice()" class="btn-primary" style="margin-top:15px; background-color: #4CAF50;">Add Device</button>
+        </div>
+    </div>
+
     <div id="modal-verify-code" class="modal-overlay hidden">
         <div class="modal-card">
             <div class="modal-header">
                 <h3>Security Check</h3>
                 <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <p style="margin-bottom:15px; color:#666; font-size:0.9rem;">Please enter the unique code printed on your ESP32 device.</p>
+            <p style="margin-bottom:15px; color:#666; font-size:0.9rem;">Please enter the unique code printed on your ESP32 device to prove ownership.</p>
             
             <input type="text" id="input-esp-code" placeholder="Enter ESP32 Code" class="input-field">
             <button onclick="verifyEspCode()" class="btn-primary" style="margin-top:10px;">Verify</button>
