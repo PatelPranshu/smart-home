@@ -34,7 +34,7 @@ app.use(cors({
 }));
 
 // 3. SECURITY HEADERS
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // 4. GLOBAL LIMITER
 const globalLimiter = rateLimit({
