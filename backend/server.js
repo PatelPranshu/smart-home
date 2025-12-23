@@ -48,7 +48,12 @@ app.use('/api/admin/login', authLimiter); // Protect Admin too
 
 // --- CORS CONFIGURATION ---
 app.use(cors({
-  origin: [process.env.ORIGIN_URL].filter(Boolean),
+  origin: [
+    "https://smart-home-lovat.vercel.app", // <--- Your Vercel Frontend
+    "http://localhost:3000",               // <--- Local Backend testing
+    "http://127.0.0.1:5500",               // <--- Local Frontend (VS Code)
+    process.env.ORIGIN_URL                 // <--- Fallback
+  ].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // <--- Added OPTIONS
   allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'], // <--- Added Authorization
   credentials: true // <--- Added for better session handling
