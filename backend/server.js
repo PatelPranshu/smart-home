@@ -21,6 +21,9 @@ const app = express();
 // 0. LOGGING (Put this FIRST so it logs everything)
 app.use(morgan('common')); // <--- NEW (Logs IP, Date, Method, URL)
 
+// 1. TRUST PROXY (REQUIRED FOR RENDER + RATE LIMIT)
+// 1 means "Trust the first proxy" (Render's Load Balancer)
+app.set('trust proxy', 1); // <--- THIS LINE IS NEW
 // 1. SECURITY HEADERS (Hides "X-Powered-By: Express")
 app.use(helmet());
 // 2. GLOBAL LIMITER (Prevent DDoS)
@@ -45,9 +48,10 @@ app.use('/api/admin/login', authLimiter); // Protect Admin too
 
 // --- CORS CONFIGURATION ---
 app.use(cors({
-  origin: process.env.ORIGIN_URL, // Allows localhost, mobile IP, and vercel
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'x-access-token','x-admin-secret']
+  origin: [process.env.ORIGIN_URL].filter(Boolean),
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // <--- Added OPTIONS
+  allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'], // <--- Added Authorization
+  credentials: true // <--- Added for better session handling
 }));
 
 app.use(express.json());
