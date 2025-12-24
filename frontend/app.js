@@ -3,8 +3,8 @@
 // ==========================================
 
 // Determine API URL (Localhost vs Render)
-// const API_URL = 'http://localhost:3000/api';
-const API_URL = 'https://smarthome-backend-rbmc.onrender.com/api';
+const API_URL = 'http://localhost:3000/api';
+// const API_URL = 'https://smarthome-backend-rbmc.onrender.com/api';
 
 // Global State
 const token = localStorage.getItem('token');
@@ -254,13 +254,17 @@ async function initEnergy() {
             
             list.innerHTML = ''; 
             if (logs.length === 0) {
-                list.innerHTML = '<p style="text-align:center; color:#999; margin-top:20px;">No activity in the last 24 hours.</p>';
+                const emptyMsg = document.createElement('p');
+                emptyMsg.style.cssText = 'text-align:center; color:#999; margin-top:20px;';
+                emptyMsg.textContent = 'No activity in the last 24 hours.';
+                list.appendChild(emptyMsg);
                 return;
             }
 
             logs.forEach(log => {
                 const item = document.createElement('div');
                 item.className = 'history-item';
+                item.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);";
                 
                 const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const dateStr = new Date(log.timestamp).toLocaleDateString();
@@ -268,22 +272,51 @@ async function initEnergy() {
                 const color = isOne ? '#22c55e' : '#ef4444';
                 const icon = isOne ? 'fa-toggle-on' : 'fa-toggle-off';
 
-                item.innerHTML = `
-                    <div style="display:flex; align-items:center; gap:15px;">
-                        <div style="width:40px; height:40px; background:#f3f4f6; border-radius:50%; display:flex; align-items:center; justify-content:center; color:${color}; font-size:1.2rem;">
-                            <i class="fa-solid ${icon}"></i>
-                        </div>
-                        <div>
-                            <div style="font-weight:600; color:#333;">${log.switchName}</div>
-                            <div style="font-size:0.8rem; color:#666;">${log.action}</div>
-                        </div>
-                    </div>
-                    <div style="text-align:right;">
-                        <div style="font-weight:700; font-size:0.9rem; color:#333;">${timeStr}</div>
-                        <div style="font-size:0.7rem; color:#9ca3af;">${dateStr}</div>
-                    </div>
-                `;
-                item.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);";
+                // --- 1. Left Side (Icon + Text) ---
+                const leftDiv = document.createElement('div');
+                leftDiv.style.cssText = "display:flex; align-items:center; gap:15px;";
+
+                // Icon Wrapper
+                const iconDiv = document.createElement('div');
+                iconDiv.style.cssText = `width:40px; height:40px; background:#f3f4f6; border-radius:50%; display:flex; align-items:center; justify-content:center; color:${color}; font-size:1.2rem;`;
+                iconDiv.innerHTML = `<i class="fa-solid ${icon}"></i>`; // Icons are trusted static classes
+
+                // Text Wrapper
+                const textDiv = document.createElement('div');
+                
+                // Device Name (SECURE)
+                const nameEl = document.createElement('div');
+                nameEl.style.cssText = "font-weight:600; color:#333;";
+                nameEl.textContent = log.switchName; // Uses textContent to prevent XSS
+
+                // Action Text (SECURE)
+                const actionEl = document.createElement('div');
+                actionEl.style.cssText = "font-size:0.8rem; color:#666;";
+                actionEl.textContent = log.action; // Uses textContent to prevent XSS
+
+                textDiv.appendChild(nameEl);
+                textDiv.appendChild(actionEl);
+                leftDiv.appendChild(iconDiv);
+                leftDiv.appendChild(textDiv);
+
+                // --- 2. Right Side (Time + Date) ---
+                const rightDiv = document.createElement('div');
+                rightDiv.style.textAlign = 'right';
+
+                const timeEl = document.createElement('div');
+                timeEl.style.cssText = "font-weight:700; font-size:0.9rem; color:#333;";
+                timeEl.textContent = timeStr;
+
+                const dateEl = document.createElement('div');
+                dateEl.style.cssText = "font-size:0.7rem; color:#9ca3af;";
+                dateEl.textContent = dateStr;
+
+                rightDiv.appendChild(timeEl);
+                rightDiv.appendChild(dateEl);
+
+                // --- 3. Assemble ---
+                item.appendChild(leftDiv);
+                item.appendChild(rightDiv);
                 list.appendChild(item);
             });
 
@@ -584,6 +617,14 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
             signal: controller.signal
         });
         clearTimeout(timeoutId); 
+
+        // --- NEW: Check for Rate Limit (429) ---
+        if (response.status === 429) {
+            showToast("⚠️ Too many requests! Please wait a moment.", "warning");
+            return; // Stop here so UI doesn't update falsely
+        }
+        // ----------------------------------------
+        
         if (!response.ok) throw new Error("Error");
 
         const statusText = cardElement.querySelector('.device-status');
