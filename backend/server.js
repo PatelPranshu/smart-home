@@ -26,9 +26,6 @@ app.set('trust proxy', 1);
 // --- MOVE CORS HERE (MUST BE BEFORE RATE LIMITERS) ---
 app.use(cors({
   origin: [
-    "https://smart-home-lovat.vercel.app", 
-    "http://localhost:3000",
-    "http://127.0.0.1:5500",
     process.env.ORIGIN_URL
   ].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -37,7 +34,18 @@ app.use(cors({
 }));
 
 // 2. SECURITY HEADERS
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+      styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
+      fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:"],
+      connectSrc: ["'self'", "https://smarthome-backend-rbmc.onrender.com"] // Allow API calls
+    },
+  },
+}));
 
 // 3. GLOBAL LIMITER
 const globalLimiter = rateLimit({
@@ -75,6 +83,10 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
   .catch(err => console.error(err));
 
+const appSmartHome = smarthome({
+  // jwt: require('./smart-home-key.json') // (Optional: Only needed if you want "Report State" later)
+  jwt: process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : require('./smart-home-key.json')
+});
 
   // Enable parsing form data for the login page
 app.use(express.urlencoded({ extended: true }));
@@ -220,7 +232,17 @@ app.post('/api/register', [
 });
 
 // Login
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', [
+    // Validate Email
+    body('email').isEmail().normalizeEmail().withMessage('Invalid Email'),
+    // Validate Password (ensure it's not empty)
+    body('password').not().isEmpty().trim().escape().withMessage('Password is required')
+], async (req, res) => {
+    // Check for errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ error: errors.array()[0].msg });
+    }
   const { email, password } = req.body;
   const user = await User.findOne({ email });
   if (!user) return res.status(400).json({ error: 'User not found' });
@@ -307,60 +329,81 @@ app.post('/api/claim-device', auth, async (req, res) => {
 });
 
 // Toggle Switch
-app.post('/api/control', auth, async (req, res) => {
-  const { deviceId, switchId, state } = req.body;
-  
-  const device = await Device.findOne({ deviceId, owner: req.user.id });
-  if (!device) return res.status(404).json({ error: "Device not found" });
+app.post('/api/control', auth, [
+    body('deviceId').isString().trim().escape(),
+    body('switchId').isInt(),
+    body('state').isBoolean()
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid Input' });
 
-  const payload = JSON.stringify({ switchId, state });
-  mqttClient.publish(`devices/${deviceId}/command`, payload);
+    const { deviceId, switchId, state } = req.body;
 
-  let updateFields = { "switches.$.state": state };
-  if (state) {
-      updateFields["switches.$.lastOnTime"] = new Date();
-  } else {
-      updateFields["switches.$.lastOnTime"] = null;
-      updateFields["switches.$.timerExpiresAt"] = null; 
-  }
+    try {
+        const device = await Device.findOne({ deviceId, owner: req.user.id });
+        if (!device) return res.status(404).json({ error: "Device not found" });
 
-// ... inside app.post('/api/control') ...
-  await Device.updateOne(
-    { deviceId: deviceId, "switches.id": switchId },
-    { $set: updateFields }
-  );
+        // 1. MQTT Publish
+        const payload = JSON.stringify({ switchId, state });
+        mqttClient.publish(`devices/${deviceId}/command`, payload);
 
-  // LOG HISTORY (New)
-  const sw = device.switches.find(s => s.id === switchId);
-  await History.create({
-      owner: req.user.id,
-      deviceId: deviceId,
-      switchName: sw ? sw.name : `Switch ${switchId}`,
-      action: state ? "Turned ON (App)" : "Turned OFF (App)"
-  });
+        // 2. Update Database
+        let updateFields = { "switches.$.state": state };
+        if (state) {
+            updateFields["switches.$.lastOnTime"] = new Date();
+        } else {
+            updateFields["switches.$.lastOnTime"] = null;
+            updateFields["switches.$.timerExpiresAt"] = null;
+        }
 
-  // --- NEW: Report State to Google Home (Syncs App) ---
-  try {
-      await appSmartHome.reportState({
-          agentUserId: req.user.id,
-          requestId: Math.random().toString(),
-          payload: {
-              devices: {
-                  states: {
-                      [`${deviceId}-${switchId}`]: {
-                          on: state,
-                          online: true
-                      }
-                  }
-              }
-          }
-      });
-  } catch (err) {
-      console.error("Google Home Report State Failed:", err);
-  }
-  // ----------------------------------------------------
+        await Device.updateOne(
+            { deviceId: deviceId, "switches.id": switchId },
+            { $set: updateFields }
+        );
 
-  res.json({ status: 'sent', state });;
+        // ----------------------------------------------------
+        // ⚡ SPEED UPDATE: Respond to user NOW
+        // ----------------------------------------------------
+        res.json({ status: 'sent', state });
+
+        // 3. Background Tasks (Runs AFTER response is sent)
+        (async () => {
+            try {
+                // Task A: Log History
+                const sw = device.switches.find(s => s.id === switchId);
+                await History.create({
+                    owner: req.user.id,
+                    deviceId: deviceId,
+                    switchName: sw ? sw.name : `Switch ${switchId}`,
+                    action: state ? "Turned ON (App)" : "Turned OFF (App)"
+                });
+
+                // Task B: Report to Google (The Slow Part)
+                await appSmartHome.reportState({
+                    agentUserId: req.user.id,
+                    requestId: Math.random().toString(),
+                    payload: {
+                        devices: {
+                            states: {
+                                [`${deviceId}-${switchId}`]: {
+                                    on: state,
+                                    online: true
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (bgErr) {
+                console.error("Background Task Error:", bgErr.message);
+            }
+        })();
+        // ----------------------------------------------------
+
+    } catch (err) {
+        console.error(err);
+        // Only send error if we haven't responded yet
+        if (!res.headersSent) res.status(500).json({ error: "Server Error" });
+    }
 });
 
 // Edit Device (Name & Icon)
@@ -611,10 +654,7 @@ app.get('/api/admin/users', auth, verifyAdmin, async (req, res) => {
 // GOOGLE ASSISTANT INTEGRATION
 // ==========================================
 
-const appSmartHome = smarthome({
-  // jwt: require('./smart-home-key.json') // (Optional: Only needed if you want "Report State" later)
-  jwt: process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : require('./smart-home-key.json')
-});
+
 
 // 1. OAUTH: Authorization Page
 // Google opens this URL in a popup on your phone to ask for login.
