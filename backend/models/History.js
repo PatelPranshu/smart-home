@@ -1,4 +1,3 @@
-// backend/models/History.js
 const mongoose = require('mongoose');
 
 const HistorySchema = new mongoose.Schema({
@@ -9,8 +8,7 @@ const HistorySchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now }
 });
 
-// --- AUTOMATIC DELETE AFTER 24 HOURS ---
-// This tells MongoDB to remove documents 86400 seconds (24h) after the 'timestamp'
+// AUTOMATIC DELETE AFTER 24 HOURS
 HistorySchema.index({ timestamp: 1 }, { expireAfterSeconds: 86400 });
 
 module.exports = mongoose.model('History', HistorySchema);
