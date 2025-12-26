@@ -43,7 +43,7 @@ app.use(helmet({
       styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
       fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'", "https://smarthome-backend-rbmc.onrender.com"]
+      connectSrc: ["'self'", "https://smart-home-04m4.onrender.com"]
     },
   },
 }));
