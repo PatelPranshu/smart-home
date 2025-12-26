@@ -26,16 +26,14 @@ app.set('trust proxy', 1);
 
 //CORS HERE ---
 app.use(cors({
-  origin: ["https://smart-home-lovat.vercel.app",
-    process.env.ORIGIN_URL
-  ].filter(Boolean),
+  origin: ["*"].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
   credentials: true
 }));
 
 // SECURITY HEADERS
-app.use(helmet({ config: true }))
+// app.use(helmet({ config: true }))
 
 // GLOBAL LIMITER
 const globalLimiter = rateLimit({
