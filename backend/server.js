@@ -44,7 +44,11 @@ app.use(helmet({
       fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:"],
       connectSrc: ["'self'", "https://smart-home-04m4.onrender.com"],
-      formAction: ["'self'", "https://smart-home-04m4.onrender.com"],
+      formAction: [
+        "'self'", 
+        "https://smart-home-04m4.onrender.com", 
+        "https://oauth-redirect.googleusercontent.com" // Allow redirecting back to Google
+      ],
     },
   },
 }));
