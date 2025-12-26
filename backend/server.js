@@ -35,18 +35,7 @@ app.use(cors({
 }));
 
 // SECURITY HEADERS
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
-      styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
-      fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'", "https://smart-home-04m4.onrender.com"]
-    },
-  },
-}));
+app.use(helmet({ config: true }))
 
 // GLOBAL LIMITER
 const globalLimiter = rateLimit({
