@@ -47,28 +47,34 @@ app.use(helmet({
       formAction: [
         "'self'", 
         "https://smart-home-04m4.onrender.com", 
-        "https://oauth-redirect.googleusercontent.com" // Allow redirecting back to Google
+        "https://oauth-redirect.googleusercontent.com"
       ],
-    },
+    },  
   },
 }));
 
 // GLOBAL LIMITER
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 100, 
-  message: "Too many requests from this IP, please try again later."
+  windowMs: 1 * 60 * 1000, // 1 Minute
+  max: 200,                // 200 requests
+  message: "Too many requests, please slow down."
 });
 app.use(globalLimiter);
 
-// STRICT LIMITER FOR LOGIN
+// STRICT LIMITER (For Passwords, Codes, and Sensitive Actions)
 const authLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, 
-  max: 5, 
-  message: "Too many login attempts. Account locked for 1 hour."
+  windowMs: 60 * 60 * 1000, // 1 Hour
+  max: 10,                   // 10 Attempts
+  message: "Too many failed attempts. Access locked for 1 hour."
 });
+
+// Apply to Login (Existing)
 app.use('/api/login', authLimiter);
 app.use('/api/admin/login', authLimiter);
+
+app.use('/api/verify-password', authLimiter); // identifying wifi password
+app.use('/api/verify-code', authLimiter);     // guessing kit codes
+app.use('/api/claim-device', authLimiter);    // guessing device IDs
 
 app.use(express.json());
 
@@ -533,7 +539,7 @@ app.post('/api/wifi-config', auth, async (req, res) => {
 
 // ... (Previous imports and DB connection) ...
 
-// --- NEW VERIFICATION APIs ---
+        // VERIFICATION APIs
 
 // Verify User Password (For Wi-Fi Access)
 app.post('/api/verify-password', auth, async (req, res) => {
