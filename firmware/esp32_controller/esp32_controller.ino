@@ -3,12 +3,12 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h> 
 #include <Preferences.h>
-#include <WiFiManager.h> // <--- REQUIRED LIBRARY
+#include <WiFiManager.h> 
 #include <time.h>
 
 // --- CONFIGURATION ---
 
-// 1. SSL CERTIFICATE (Required for HiveMQ Cloud)
+// 1. SSL CERTIFICATE (HiveMQ Cloud)
 const char* root_ca = \
 "-----BEGIN CERTIFICATE-----\n" \
 "MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw\n" \
@@ -44,35 +44,36 @@ const char* root_ca = \
 
 // MQTT Broker
 const char* mqtt_server = "6c37b4fdae72447883f91b6cc992648e.s1.eu.hivemq.cloud";
-const int mqtt_port = 8883; // Secure Port
+const int mqtt_port = 8883; 
 const char* mqtt_user = "backend_admin";
 const char* mqtt_pass = "Admin@3500";
 
-// --- DYNAMIC GLOBALS (Defined at runtime) ---
+// --- DYNAMIC GLOBALS ---
 String uniqueDeviceId; 
 String commandTopic;
 String updateTopic;
 String syncTopic;
 String statusTopic;
 String wifiTopic; 
-String currentSSID = "Unknown"; // For display only
-int wifiRetryCount = 0;
-unsigned long lastWifiCheck = 0;
+unsigned long lastWifiCheck = 0; 
 
 // --- PINS ---
 const int NUM_RELAYS = 8;
 const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32};
-const int switchPins[NUM_RELAYS] = {15,  4, 16, 17,  5, 18, 19, 21};
+const int switchPins[NUM_RELAYS] = {15, 4, 16, 17, 5, 18, 19, 21};
 const int STATUS_LED = 2;
+const int TOUCH_RESET_PIN = 0; // Boot Button
 
 // --- OBJECTS ---
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
 Preferences preferences; 
 
-// Switch State Tracking
-bool relayState[NUM_RELAYS] = {false};
-int lastSwitchState[NUM_RELAYS] = {HIGH}; 
+// Volatile for Thread Safety
+volatile bool relayState[NUM_RELAYS] = {false};
+volatile bool triggerSwitchFeedback = false; 
+
+int lastSwitchState[NUM_RELAYS] = {HIGH};
 unsigned long lastDebounceTime[NUM_RELAYS] = {0};
 unsigned long debounceDelay = 50;
 
@@ -81,99 +82,62 @@ unsigned long lastMqttAttempt = 0;
 const unsigned long mqttInterval = 5000;
 int mqttRetryCount = 0;
 unsigned long lastHeartbeat = 0;
+unsigned long touchStartTime = 0; 
 
-// LED Status
-int ledState = LOW;
+// LED STATE MANAGEMENT
+enum SystemState {
+  STATE_IDLE,       // Everything OK (LED OFF)
+  STATE_NO_WIFI,    // Fast Blink (200ms)
+  STATE_NO_MQTT,    // Slow Blink (1000ms)
+  STATE_SETUP,      // Solid ON
+  STATE_FEEDBACK    // Quick Pulse
+};
+
+SystemState currentSystemState = STATE_NO_WIFI;
+SystemState lastLoggedState = STATE_IDLE; 
 unsigned long previousLedMillis = 0;
-unsigned long successStateStart = 0;
-bool isSuccessAnim = false;       
-bool mqttKnownConnected = false;
+bool ledState = LOW;
 unsigned long blinkStartTime = 0;
 bool isBlinking = false;
-const int BLINK_DURATION = 100;
+const int FEEDBACK_DURATION = 100;
 
 // Multithreading
 TaskHandle_t SwitchTask; 
 bool mqttNeedsUpdate[NUM_RELAYS] = {false};
 
-// --- HELPER: Trigger Manual Blink ---
-void blinkFeedback() {
-  digitalWrite(STATUS_LED, HIGH);
-  blinkStartTime = millis();
-  isBlinking = true;
+// --- HELPER: SAVE & LOAD STATE ---
+void saveState(int id, bool state) {
+  char key[10];
+  sprintf(key, "sw_%d", id);
+  preferences.putBool(key, state);
 }
 
-// --- HELPER: Manage All LED Patterns ---
-void handleLedStatus() {
-  unsigned long now = millis();
-  bool currentMqtt = client.connected();
-  bool currentWifi = (WiFi.status() == WL_CONNECTED);
-
-  // Success Animation logic
-  if (currentMqtt && !mqttKnownConnected) {
-      mqttKnownConnected = true;
-      isSuccessAnim = true;
-      successStateStart = now;
-      digitalWrite(STATUS_LED, HIGH); 
-  }
-  if (!currentMqtt) mqttKnownConnected = false;
-
-  if (isSuccessAnim) {
-      if (now - successStateStart > 2000) {
-          isSuccessAnim = false;
-          digitalWrite(STATUS_LED, LOW);
-      }
-      return; 
-  }
-
-  // WiFi Connecting (Fast Blink)
-  if (!currentWifi) {
-      if (now - previousLedMillis >= 100) {
-          previousLedMillis = now;
-          ledState = !ledState;
-          digitalWrite(STATUS_LED, ledState);
-      }
-      return;
-  } 
-  
-  // MQTT Connecting (Slow Blink)
-  else if (!currentMqtt) {
-      if (now - previousLedMillis >= 300) {
-          previousLedMillis = now;
-          ledState = !ledState;
-          digitalWrite(STATUS_LED, ledState);
-      }
-      return;
-  } 
-  
-  // Idle / Feedback
-  else {
-      if (isBlinking) {
-          if (now - blinkStartTime >= BLINK_DURATION) {
-              digitalWrite(STATUS_LED, LOW);
-              isBlinking = false;
-          }
-      } else {
-         digitalWrite(STATUS_LED, LOW);
-      }
+void loadState() {
+  for(int i=0; i<NUM_RELAYS; i++) {
+    char key[10];
+    sprintf(key, "sw_%d", i);
+    relayState[i] = preferences.getBool(key, false); 
+    digitalWrite(relayPins[i], relayState[i] ? LOW : HIGH);
   }
 }
 
 // --- CORE 0: SWITCH TASK ---
 void switchTaskCode(void *PvParameters) {
+  int stableState[NUM_RELAYS];
+  for(int i=0; i<NUM_RELAYS; i++) stableState[i] = HIGH; 
+
   for (;;) {
     for(int i=0; i<NUM_RELAYS; i++) {
        int reading = digitalRead(switchPins[i]);
        if (reading != lastSwitchState[i]) lastDebounceTime[i] = millis();
 
        if ((millis() - lastDebounceTime[i]) > debounceDelay) {
-          // Adjust HIGH/LOW based on your physical switch type (Momentary vs Toggle)
-          static int stableState[NUM_RELAYS] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH}; 
           if (reading != stableState[i]) {
              stableState[i] = reading;
-             blinkFeedback(); 
+             triggerSwitchFeedback = true; // Request LED feedback
              relayState[i] = !relayState[i];
              digitalWrite(relayPins[i], relayState[i] ? LOW : HIGH);
+             saveState(i, relayState[i]);
              mqttNeedsUpdate[i] = true;
           }
        }
@@ -183,39 +147,107 @@ void switchTaskCode(void *PvParameters) {
   }
 }
 
+// --- NEW LED HANDLER WITH STATES ---
+void handleLedStatus() {
+  unsigned long now = millis();
+
+  // 1. PRIORITY: Immediate Switch Feedback
+  if (triggerSwitchFeedback) {
+      triggerSwitchFeedback = false; 
+      digitalWrite(STATUS_LED, HIGH);
+      blinkStartTime = now;
+      isBlinking = true;
+      Serial.println("[LED] Feedback Pulse");
+      return; 
+  }
+
+  // Handle Feedback Duration
+  if (isBlinking) {
+      if (now - blinkStartTime >= FEEDBACK_DURATION) {
+          digitalWrite(STATUS_LED, LOW);
+          isBlinking = false;
+      }
+      return; 
+  }
+
+  // 2. DETERMINE STATE
+  bool currentMqtt = client.connected();
+  bool currentWifi = (WiFi.status() == WL_CONNECTED);
+
+  if (!currentWifi) {
+      currentSystemState = STATE_NO_WIFI;
+  } else if (!currentMqtt) {
+      currentSystemState = STATE_NO_MQTT;
+  } else {
+      currentSystemState = STATE_IDLE;
+  }
+
+  // 3. EXECUTE STATE BLINKING
+  switch (currentSystemState) {
+    case STATE_NO_WIFI:
+      // Fast Blink (200ms) - WiFi Lost / Searching
+      if (now - previousLedMillis >= 200) {
+        previousLedMillis = now;
+        ledState = !ledState;
+        digitalWrite(STATUS_LED, ledState);
+        if (lastLoggedState != STATE_NO_WIFI) {
+           Serial.println("[LED] State: No WiFi (Fast Blink)");
+           lastLoggedState = STATE_NO_WIFI;
+        }
+      }
+      break;
+
+    case STATE_NO_MQTT:
+      // Slow Blink (1000ms) - Connected to WiFi, but no Server
+      if (now - previousLedMillis >= 1000) {
+        previousLedMillis = now;
+        ledState = !ledState;
+        digitalWrite(STATUS_LED, ledState);
+        if (lastLoggedState != STATE_NO_MQTT) {
+           Serial.println("[LED] State: No MQTT (Slow Blink)");
+           lastLoggedState = STATE_NO_MQTT;
+        }
+      }
+      break;
+
+    case STATE_IDLE:
+      // Solid OFF - Everything OK
+      digitalWrite(STATUS_LED, LOW); 
+      if (lastLoggedState != STATE_IDLE) {
+          Serial.println("[LED] State: Online (OFF)");
+          lastLoggedState = STATE_IDLE;
+      }
+      break;
+      
+    default:
+      digitalWrite(STATUS_LED, LOW);
+      break;
+  }
+}
+
 void callback(char* topic, byte* payload, unsigned int length) {
-  blinkFeedback();
+  triggerSwitchFeedback = true; 
   String message;
   for (int i = 0; i < length; i++) message += (char)payload[i];
+  Serial.print("[MQTT] Recv: ");
+  Serial.println(topic);
 
-  // --- A. CHECK FOR WIFI UPDATE ---
-  // FIX: This now uses the global wifiTopic variable correctly
   if (String(topic) == wifiTopic) {
-      Serial.println("New Wi-Fi Credentials Received via MQTT!");
-      
       StaticJsonDocument<200> doc;
       deserializeJson(doc, message);
       const char* newSSID = doc["ssid"];
       const char* newPass = doc["pass"];
-      
       if (newSSID && newPass) {
-          Serial.println("Updating System Wi-Fi...");
-          
-          // FIX: Force system to save to NVS by calling begin()
+          Serial.println("[MQTT] Remote WiFi Update...");
           WiFi.disconnect(); 
           delay(100);
           WiFi.begin(newSSID, newPass); 
-          
-          // Wait a moment for the ESP32 to write to flash memory
           delay(2000); 
-          
-          Serial.println("Restarting to apply changes...");
           ESP.restart(); 
       }
       return;
   }
 
-  // --- B. NORMAL SWITCH COMMAND ---
   StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, message);
   if (!error) {
@@ -224,71 +256,78 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if (id >= 0 && id < NUM_RELAYS) {
       relayState[id] = state;
       digitalWrite(relayPins[id], state ? LOW : HIGH); 
+      saveState(id, state); 
+      Serial.printf("[MQTT] Sw %d -> %s\n", id, state ? "ON" : "OFF");
     }
   }
 }
 
-// --- HELPER: Sync Time for SSL Validation ---
 void setClock() {
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov"); // UTC time
-
-  Serial.print(F("Waiting for NTP time sync: "));
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov"); 
+  Serial.print(F("Syncing Time"));
   time_t nowSecs = time(nullptr);
-  while (nowSecs < 8 * 3600 * 2) { // Wait until time is > year 2016 roughly
+  int retry = 0;
+  while (nowSecs < 8 * 3600 * 2 && retry < 20) { 
     delay(500);
-    Serial.print(F("."));
+    Serial.print(".");
     yield();
     nowSecs = time(nullptr);
+    retry++;
   }
-
-  Serial.println();
-  struct tm timeinfo;
-  gmtime_r(&nowSecs, &timeinfo);
-  Serial.print(F("Current time: "));
-  Serial.print(asctime(&timeinfo));
+  Serial.println(" Done");
 }
 
 void checkWiFiConnection() {
-  // Only run this check every 10 seconds to avoid spamming
+  // Infinite Retry Logic
   if (millis() - lastWifiCheck > 10000) { 
     lastWifiCheck = millis();
-
     if (WiFi.status() != WL_CONNECTED) {
-      wifiRetryCount++;
-      Serial.print("WiFi connection lost. Retry count: ");
-      Serial.println(wifiRetryCount);
-      
-      // Attempt to reconnect visually
-      WiFi.reconnect();
-
-      // --- THE SELF-HEALING BLOCK ---
-      if (wifiRetryCount >= 1) {
-        Serial.println("\n!!! CONNECTION FAILED REPEATEDLY (2 Mins) !!!");
-        Serial.println("Wiping bad Wi-Fi settings and restarting...");
-        
-        // 1. Wipe WiFiManager settings
-        WiFiManager wm;
-        wm.resetSettings();
-        
-        // 2. Wipe Preferences (as requested)
-        preferences.clear(); 
-        
-        // 3. Restart into Setup Mode
-        ESP.restart(); 
-      }
-      // -----------------------------
-    } else {
-      // If we are connected, reset the counter to 0
-      wifiRetryCount = 0;
+      Serial.println("[WiFi] Lost. Retrying background connection...");
+      // Do NOT reboot here. Just trigger reconnect.
+      WiFi.reconnect(); 
     }
   }
+}
+
+void blinkFast() {
+  digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
+}
+
+// Setup Mode Callback
+void configModeCallback (WiFiManager *myWiFiManager) {
+  Serial.println("[Setup] Config Mode Started");
+  Serial.println("[Setup] Hotspot: " + myWiFiManager->getConfigPortalSSID());
+  digitalWrite(STATUS_LED, HIGH); // Solid ON in setup
 }
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("\n[Boot] System Starting...");
+  
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LOW); 
+  
+  preferences.begin("relays", false);
+  pinMode(TOUCH_RESET_PIN, INPUT_PULLUP); 
 
+  // --- BOOT-TIME FACTORY RESET ---
+  if (digitalRead(TOUCH_RESET_PIN) == LOW) { 
+    Serial.println("[Boot] Reset Button Detected...");
+    for(int i=0; i<20; i++) { 
+        blinkFast(); 
+        delay(100); 
+    }
+    if (digitalRead(TOUCH_RESET_PIN) == LOW) {
+        Serial.println("[Boot] Wiping Data & Restarting...");
+        WiFiManager wm;
+        wm.resetSettings(); 
+        preferences.clear(); 
+        digitalWrite(STATUS_LED, HIGH); 
+        delay(1000);
+        ESP.restart();
+    }
+  }
+  
   for(int i=0; i<NUM_RELAYS; i++) {
     pinMode(relayPins[i], OUTPUT);
     digitalWrite(relayPins[i], HIGH); 
@@ -296,55 +335,66 @@ void setup() {
     lastSwitchState[i] = digitalRead(switchPins[i]);
   }
 
-  // --- FIX START: Turn on WiFi Radio first ---
+  loadState();
+
+  xTaskCreatePinnedToCore(switchTaskCode, "SwitchTask", 10000, NULL, 1, &SwitchTask, 0);
+
   WiFi.mode(WIFI_STA); 
   delay(100); 
-  // ------------------------------------------
 
-  // 1. GENERATE UNIQUE ID
   String mac = WiFi.macAddress();
   mac.replace(":", ""); 
   uniqueDeviceId = "esp32_" + mac; 
-  
-  Serial.println("--------------------------------");
-  Serial.println("DEVICE ID: " + uniqueDeviceId);
-  Serial.println("--------------------------------");
+  Serial.println("[Boot] ID: " + uniqueDeviceId);
 
-  // Construct Topics dynamically
   commandTopic = "devices/" + uniqueDeviceId + "/command";
   updateTopic = "devices/" + uniqueDeviceId + "/update";
   syncTopic = "devices/" + uniqueDeviceId + "/sync";
   statusTopic = "devices/" + uniqueDeviceId + "/status";
-  
-  // FIX: removed 'String' here so it updates the Global Variable
   wifiTopic = "devices/" + uniqueDeviceId + "/wifi";
 
-  // 2. WIFI MANAGER
+  // --- WIFIMANAGER SETUP ---
   WiFiManager wm;
-  // wm.resetSettings(); // UNCOMMENT if you need to wipe settings to test again
-  
   String apName = "SmartHome_Setup_" + mac.substring(8); 
+  
+  wm.setAPCallback(configModeCallback);
+  wm.setConnectTimeout(180); // 3 Minute Timeout
+
+  Serial.println("[WiFi] AutoConnect Started...");
+  
+  // Attempt to connect. If saved creds exist, it tries them.
+  // If connection fails (bad creds OR router off), it starts AP.
   bool res = wm.autoConnect(apName.c_str(), "setup123"); 
 
   if(!res) {
-    Serial.println("Failed to connect");
-    ESP.restart();
-  } 
-  Serial.println("WiFi Connected!");
-  currentSSID = WiFi.SSID(); // Store for logging
-
-  // 3. SYNC TIME (REQUIRED FOR SSL)
-  setClock(); 
-
-  // 4. SECURE MQTT SETUP
-  espClient.setCACert(root_ca); // Enable SSL
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
-  client.setBufferSize(2048); 
-  client.setKeepAlive(15);
-
-  // 5. START SWITCH TASK
-  xTaskCreatePinnedToCore(switchTaskCode, "SwitchTask", 10000, NULL, 1, &SwitchTask, 0);
+      Serial.println("[WiFi] Connection/Setup Failed.");
+      
+      // CRITICAL LOGIC:
+      // If we failed to connect AND we have no SSID stored, 
+      // it means the device is unconfigured and the user ignored the AP.
+      // We MUST REBOOT to bring the AP back up.
+      if (WiFi.SSID() == "" || WiFi.SSID().length() == 0) {
+          Serial.println("[WiFi] No saved credentials found.");
+          Serial.println("[WiFi] Rebooting to restart Config Portal...");
+          delay(2000);
+          ESP.restart();
+      }
+      
+      // If we have an SSID, it means we are just offline (Router off).
+      // We continue without rebooting.
+      Serial.println("[WiFi] Credentials found (" + WiFi.SSID() + ").");
+      Serial.println("[WiFi] Entering Offline Mode (Infinite Retry).");
+  }
+  else {
+      Serial.println("[WiFi] Connected!");
+      Serial.println(WiFi.localIP());
+      setClock(); 
+      espClient.setCACert(root_ca);
+      client.setServer(mqtt_server, mqtt_port);
+      client.setCallback(callback);
+      client.setBufferSize(2048); 
+      client.setKeepAlive(15);
+  }
 }
 
 void handleMQTT() {
@@ -355,51 +405,78 @@ void handleMQTT() {
   if (now - lastMqttAttempt > mqttInterval) {
     lastMqttAttempt = now;
     mqttRetryCount++;
-    Serial.print("Attempting Secure MQTT connection...");
+    Serial.print("[MQTT] Connecting... ");
     
-    // Random Client ID prevents disconnection if multiple devices have same code
     String clientId = uniqueDeviceId + "-" + String(random(0xffff), HEX);
-    
-    // Note: statusTopic.c_str() converts String to const char* for the library
     if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass, statusTopic.c_str(), 0, true, "offline")) {
-      Serial.println("connected");
+      Serial.println("Success");
       client.publish(statusTopic.c_str(), "online", true);
       client.subscribe(commandTopic.c_str());
       client.subscribe(wifiTopic.c_str()); 
       client.publish(syncTopic.c_str(), "1"); 
     } else {
-      Serial.print("failed, rc=");
+      Serial.print("Fail rc=");
       Serial.println(client.state());
     }
   }
 }
 
 void loop() {
-  checkWiFiConnection();
-  handleLedStatus();
-  
-  if (client.connected()) {
-      for(int i=0; i<NUM_RELAYS; i++) {
-          if (mqttNeedsUpdate[i]) {
-              mqttNeedsUpdate[i] = false;
-              StaticJsonDocument<256> doc;
-              doc["switchId"] = i;
-              doc["state"] = relayState[i];
-              char buffer[256];
-              serializeJson(doc, buffer);
-              client.publish(updateTopic.c_str(), buffer);
-          }
+  // --- RESET BUTTON LOGIC ---
+  if (digitalRead(TOUCH_RESET_PIN) == LOW) {
+      if (touchStartTime == 0) {
+        touchStartTime = millis();
+        Serial.println("[Reset] Button Pressed...");
       }
       
-      // Heartbeat
-      if (millis() - lastHeartbeat > 30000) {
-         lastHeartbeat = millis();
-         client.publish(statusTopic.c_str(), "online", true);
-         // PRINT ID FOR DEBUGGING
-         Serial.println("Heartbeat sent. ID: " + uniqueDeviceId);
+      unsigned long heldTime = millis() - touchStartTime;
+      
+      // Visual Feedback while holding
+      if (heldTime % 100 < 50) digitalWrite(STATUS_LED, HIGH);
+      else digitalWrite(STATUS_LED, LOW);
+
+      if (heldTime > 4000) { 
+          Serial.println("[Reset] Action Triggered!");
+          digitalWrite(STATUS_LED, HIGH); 
+          WiFiManager wm;
+          wm.resetSettings(); 
+          delay(500);
+          ESP.restart(); 
       }
-      client.loop();
+  } else {
+      // FIX: Only run this logic ONCE when button is released
+      if (touchStartTime != 0) {
+          touchStartTime = 0;
+          Serial.println("[Reset] Button Released (Action Cancelled)");
+          digitalWrite(STATUS_LED, LOW); 
+      }
   }
-  
-  handleMQTT(); 
+
+  // Normal Loop Operations (only if reset not active)
+  if (touchStartTime == 0) {
+      checkWiFiConnection(); 
+      handleLedStatus(); 
+      
+      if (WiFi.status() == WL_CONNECTED) {
+          if (client.connected()) {
+              for(int i=0; i<NUM_RELAYS; i++) {
+                 if (mqttNeedsUpdate[i]) {
+                     mqttNeedsUpdate[i] = false;
+                     StaticJsonDocument<256> doc;
+                     doc["switchId"] = i;
+                     doc["state"] = relayState[i];
+                     char buffer[256];
+                     serializeJson(doc, buffer);
+                     client.publish(updateTopic.c_str(), buffer);
+                 }
+              }
+              if (millis() - lastHeartbeat > 30000) {
+                 lastHeartbeat = millis();
+                 client.publish(statusTopic.c_str(), "online", true);
+              }
+              client.loop();
+          }
+          handleMQTT(); 
+      }
+  }
 }

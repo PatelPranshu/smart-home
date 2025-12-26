@@ -1,5 +1,5 @@
 // const API_URL = 'http://localhost:3000/api';
-const API_URL = 'https://smarthome-backend-rbmc.onrender.com/api'
+const API_URL = 'https://smart-home-04m4.onrender.com/api'
 
 // 1. Get Token from LocalStorage (Saved when you logged in on index.html)
 const token = localStorage.getItem('token');
