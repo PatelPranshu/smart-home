@@ -26,14 +26,28 @@ app.set('trust proxy', 1);
 
 //CORS HERE ---
 app.use(cors({
-  origin: ["*"].filter(Boolean),
+  origin: ["https://smart-home-lovat.vercel.app",
+    process.env.ORIGIN_URL
+  ].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
   credentials: true
 }));
 
 // SECURITY HEADERS
-// app.use(helmet({ config: true }))
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+      styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
+      fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:"],
+      connectSrc: ["'self'", "https://smart-home-04m4.onrender.com"],
+      formAction: ["'self'", "https://smart-home-04m4.onrender.com"],
+    },
+  },
+}));
 
 // GLOBAL LIMITER
 const globalLimiter = rateLimit({
