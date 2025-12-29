@@ -146,7 +146,7 @@ mqttClient.on('message', async (topic, message) => {
       { $set: updateFields }
     );
 
-    // CREATE HISTORY LOG
+    // FETCH DEVICE (for History AND Google Report)
     try {
         const device = await Device.findOne({ deviceId });
         if(device) {
@@ -159,6 +159,25 @@ mqttClient.on('message', async (topic, message) => {
                 timestamp: new Date()
             });
         }
+
+        // REPORT STATE TO GOOGLE
+        if (device.owner) {
+                await appSmartHome.reportState({
+                    agentUserId: device.owner.toString(),
+                    requestId: Math.random().toString(),
+                    payload: {
+                        devices: {
+                            states: {
+                                [`${deviceId}-${data.switchId}`]: {
+                                    on: data.state,
+                                    online: device.isOnline || true
+                                }
+                            }
+                        }
+                    }
+                });
+                console.log(`Reported physical state change to Google for ${deviceId}`);
+            }
     } catch(err) { console.error("Log Error"); }
   }
 
@@ -190,6 +209,30 @@ mqttClient.on('message', async (topic, message) => {
             { deviceId: deviceId },
             { $set: { isOnline: isOnline } }
         );
+
+        try {
+            if (device.owner) {
+                // Build a payload for ALL switches on this board
+                // (If the board is offline, ALL its switches are offline)
+                let statesPayload = {};
+                device.switches.forEach(sw => {
+                    statesPayload[`${deviceId}-${sw.id}`] = {
+                        online: isOnline 
+                    };
+                });
+
+                await appSmartHome.reportState({
+                    agentUserId: device.owner.toString(),
+                    requestId: Math.random().toString(),
+                    payload: {
+                        devices: {
+                            states: statesPayload
+                        }
+                    }
+                });
+                console.log(`Reported connectivity (${status}) to Google`);
+            }
+        } catch (err) { console.error("Status Report Error:", err); }
     }
   }
 });
@@ -782,9 +825,9 @@ app.post('/api/smarthome', auth, async (req, res) => {
                     name: {
                         name: sw.name
                     },
-                    willReportState: false,
+                    willReportState: true,
                     deviceInfo: {
-                        manufacturer: 'Smart Home DIY',
+                        manufacturer: 'SmartHubPranshu',
                         model: 'ESP32'
                     }
                 });
