@@ -43,10 +43,10 @@ const char* root_ca = \
 "-----END CERTIFICATE-----";
 
 // MQTT Broker
-const char* mqtt_server = "6c37b4fdae72447883f91b6cc992648e.s1.eu.hivemq.cloud";
+const char* mqtt_server = "b05e6bbab5eb466db17fd7a4403f054e.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883; 
-const char* mqtt_user = "backend_admin";
-const char* mqtt_pass = "Admin@3500";
+const char* mqtt_user = "device_fleet_01";
+const char* mqtt_pass = "UK!tuzL4P.6N4ku";
 
 // --- DYNAMIC GLOBALS ---
 String uniqueDeviceId; 
@@ -407,13 +407,27 @@ void handleMQTT() {
     mqttRetryCount++;
     Serial.print("[MQTT] Connecting... ");
     
+    // 1. Random Client ID (Critical for Fleet stability)
     String clientId = uniqueDeviceId + "-" + String(random(0xffff), HEX);
-    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass, statusTopic.c_str(), 0, true, "offline")) {
-      Serial.println("Success");
+    
+    // 2. LWT (Dead Man's Switch) Configuration
+    const char* willTopic = statusTopic.c_str();
+    const char* willMsg = "offline";
+    int willQoS = 1;        // CHANGED: QoS 1 ensures the Broker saves the message
+    bool willRetain = true; // KEEP: True ensures the App sees "Offline" instantly
+    
+    // 3. Connect using the Fleet Credentials + LWT
+    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass, willTopic, willQoS, willRetain, willMsg)) {
+      
+      Serial.println("Success (LWT Registered)");
+      
+      // 4. Immediately override "offline" with "online"
       client.publish(statusTopic.c_str(), "online", true);
+      
       client.subscribe(commandTopic.c_str());
       client.subscribe(wifiTopic.c_str()); 
       client.publish(syncTopic.c_str(), "1"); 
+      
     } else {
       Serial.print("Fail rc=");
       Serial.println(client.state());

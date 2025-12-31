@@ -341,6 +341,24 @@ app.post('/api/user-update', auth, async (req, res) => {
   }
 });
 
+// Google Home Toggle APIs ---
+
+// Get current status
+app.get('/api/user/google-status', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        res.json({ enabled: user.googleHomeEnabled });
+    } catch (err) { res.status(500).json({ error: "Error" }); }
+});
+
+// Update status
+app.post('/api/user/google-status', auth, async (req, res) => {
+    const { enabled } = req.body;
+    try {
+        await User.findByIdAndUpdate(req.user.id, { googleHomeEnabled: enabled });
+        res.json({ status: 'updated', enabled });
+    } catch (err) { res.status(500).json({ error: "Update failed" }); }
+});
 
 // --- DEVICE API ---
 
@@ -580,7 +598,6 @@ app.post('/api/wifi-config', auth, async (req, res) => {
 });
 
 
-// ... (Previous imports and DB connection) ...
 
         // VERIFICATION APIs
 
@@ -801,6 +818,39 @@ app.post('/api/smarthome', auth, async (req, res) => {
     const intent = body.inputs[0].intent;
 
     console.log(`Google Request: ${intent}`);
+
+ //CHECK TOGGLE STATUS ---
+    const user = await User.findById(userId);
+    
+    // If user has disabled Google Home, we force devices to appear OFFLINE
+    if (!user || user.googleHomeEnabled === false) {
+        
+        // QUERY INTENT (Status Check) -> Report "Offline"
+        if (intent === 'action.devices.QUERY') {
+            const requestedDevices = body.inputs[0].payload.devices;
+            const deviceStatus = {};
+            requestedDevices.forEach(d => {
+                deviceStatus[d.id] = { online: false }; // Force Offline
+            });
+            return res.json({
+                requestId: requestId,
+                payload: { devices: deviceStatus }
+            });
+        }
+
+        // EXECUTE INTENT (Turn On/Off) -> Block it
+        if (intent === 'action.devices.EXECUTE') {
+             return res.json({
+                requestId: requestId,
+                payload: {
+                    errorCode: "deviceOffline" // Tell Google device is unreachable
+                }
+            });
+        }
+
+        // Note: We allow SYNC to proceed so devices don't disappear from the Google Home App,
+        // they just stop working (Offline).
+    }
 
     // SYNC: Google asks "What devices does this user have?" 
     if (intent === 'action.devices.SYNC') {

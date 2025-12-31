@@ -329,12 +329,42 @@ async function initEnergy() {
 
 
 // ==========================================
-// 5. PAGE: SETTINGS (settings.html)
+// 5. PAGE: SETTINGS (settings.html)    
 // ==========================================
 async function initSettings() {
     const userEmail = localStorage.getItem('userEmail') || "User"; 
     document.getElementById('username-display').innerText = userEmail;
 
+
+    // --- NEW: Load Google Toggle State ---
+    const toggleEl = document.getElementById('google-toggle');
+    try {
+        const res = await fetch(`${API_URL}/user/google-status`, {
+            headers: { 'x-access-token': token }
+        });
+        const data = await res.json();
+        if(toggleEl) toggleEl.checked = data.enabled;
+    } catch(err) { console.error("Failed to fetch google settings"); }
+
+    // --- NEW: Handle Toggle Change ---
+    window.toggleGoogleHome = async () => {
+        const isEnabled = toggleEl.checked;
+        try {
+            await fetch(`${API_URL}/user/google-status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ enabled: isEnabled })
+            });
+            
+            if(isEnabled) showToast("Google Home Enabled", "success");
+            else showToast("Google Home Disabled (Devices will appear offline)", "warning");
+            
+        } catch(err) { 
+            showToast("Failed to update settings", "error");
+            toggleEl.checked = !isEnabled; // Revert UI on error
+        }
+    };
+    
     window.closeModals = () => {
         document.querySelectorAll('.modal-overlay').forEach(el => el.classList.add('hidden'));
     };
