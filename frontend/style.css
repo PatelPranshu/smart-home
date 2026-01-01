@@ -45,7 +45,7 @@ body {
     background-size: cover;
     background-position: center;
     color: var(--text-main-light);
-    height: 100dvh;
+    height: 100%;
     width: 100vw;
     overflow: hidden; /* Prevents whole page scroll */
     display: flex;
@@ -154,7 +154,7 @@ body {
 .dashboard-container {
     display: flex;
     flex-direction: column;
-    height: 100dvh; /* Force full viewport height */
+    height: 100%; /* Force full viewport height */
     width: 100%;
     overflow: hidden; /* Prevent body scroll */
 }
@@ -365,18 +365,23 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 
 /* --- 7. BOTTOM NAVIGATION --- */
 .bottom-nav {
-    /* Remove position: fixed */
     position: relative; 
     width: 100%;
-    
-    /* Make Transparent */
     background: transparent; 
-    backdrop-filter: none; /* Remove blur if you want pure transparency */
     border: none;
-    
-    padding: 0.5rem 1.5rem 1.5rem 1.5rem;
     z-index: 50;
-    flex-shrink: 0; /* Prevent nav from being squashed */
+    flex-shrink: 0;
+
+    /* --- UPDATE THIS SECTION --- */
+    /* Old padding: padding: 0.5rem 1.5rem 1.5rem 1.5rem; */
+    
+    /* New padding that respects the phone's safe area */
+    padding-top: 0.5rem;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+    
+    /* 1.5rem + the system safe area height */
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); 
 }
 .nav-inner {
     display: flex; justify-content: space-between;
