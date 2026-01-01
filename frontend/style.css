@@ -37,7 +37,9 @@
 }
 
 body {
-   background-image: linear-gradient(90deg, #020024 0%, #090979 35%, #00d4ff 100%);
+   background-image: linear-gradient(180deg, #020024 0%, #090979 35%,#1414d2 70%, #00d4ff 100%);
+   /* background-image: linear-gradient(180deg, #020024 0%, #090979 70%, #0190ac 100%); */
+   
 
     color: var(--text-main-light);
     height: 100vh;
