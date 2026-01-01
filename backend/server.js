@@ -26,7 +26,7 @@ app.set('trust proxy', 1);
 
 //CORS HERE ---
 app.use(cors({
-  origin: [process.env.ORIGIN_URL,"https://oauth-redirect.googleusercontent.com"].filter(Boolean),
+  origin: [process.env.FRONTEND_URL,"https://oauth-redirect.googleusercontent.com"].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
   credentials: true
@@ -41,10 +41,10 @@ app.use(helmet({
       styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
       fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'", "https://smart-home-04m4.onrender.com"],
+      connectSrc: ["'self'", process.env.ORIGIN_URL],
       formAction: [
         "'self'", 
-        "https://smart-home-04m4.onrender.com", 
+        process.env.ORIGIN_URL, 
         "https://oauth-redirect.googleusercontent.com"
       ],
     },  
