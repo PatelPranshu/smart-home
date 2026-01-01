@@ -45,7 +45,7 @@ body {
     background-size: cover;
     background-position: center;
     color: var(--text-main-light);
-    height: 100vh;
+    height: 100dvh;
     width: 100vw;
     overflow: hidden; /* Prevents whole page scroll */
     display: flex;
@@ -154,7 +154,7 @@ body {
 .dashboard-container {
     display: flex;
     flex-direction: column;
-    height: 100vh; /* Force full viewport height */
+    height: 100dvh; /* Force full viewport height */
     width: 100%;
     overflow: hidden; /* Prevent body scroll */
 }
