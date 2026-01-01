@@ -4,12 +4,14 @@
 
 /* --- 1. CSS VARIABLES (THEME) --- */
 :root {
-    --bg-color: #f2f2f7;
+    --bg-color: #ffffff00;
     --surface-color: #ffffff;
     --primary-color: #3b82f6; /* Bright Blue */
     --primary-hover: #2563eb;
-    --text-main: #1f2937;
+    --text-main-light: #ffffff;
+    --text-sub-light: #d1d5db;  
     --text-sub: #9ca3af;
+    --text-main-dark: #111827;
     --success-color: #22c55e;
     --danger-color: #ef4444;
     --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
@@ -26,11 +28,17 @@
     padding: 0;
     font-family: 'Inter', sans-serif;
     -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  /* Vendor prefixes for broader compatibility (optional for modern browsers) */
+  -webkit-user-select: none; /* Safari, Chrome */
+  -moz-user-select: none;    /* Firefox */
+  -ms-user-select: none;     /* Internet Explorer/Edge */
+    
 }
 
 body {
-    background-color: var(--bg-color);
-    color: var(--text-main);
+    background: linear-gradient(15deg, #142850, #14365f, #13476f, #125d80, #107792, #0d96a5, #09b8b4, #04ccb1);
+    color: var(--text-main-light);
     height: 100vh;
     width: 100vw;
     overflow: hidden; /* Prevents whole page scroll */
@@ -68,7 +76,16 @@ body {
     max-width: 360px;
     text-align: center;
 }
-
+.login-card h1 {
+    font-size: 1.75rem;
+    margin-bottom: 1rem;
+    color: var(--text-main-dark);
+}
+.login-card p {
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+    color: var(--text-sub);
+}
 .login-icon {
     width: 80px;
     height: 80px;
@@ -88,7 +105,7 @@ body {
     width: 100%;
     padding: 0.875rem 1rem;
     border-radius: var(--radius-lg);
-    background-color: #f9fafb;
+    background-color: #ebeff4;
     border: 2px solid transparent;
     outline: none;
     transition: 0.2s;
@@ -138,15 +155,15 @@ body {
 
 /* Header */
 header {
-    padding: 2rem 1.5rem 1rem 1.5rem;
+    padding: 1rem 1.5rem 1rem 1.5rem;
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
     background-color: var(--bg-color);
     flex-shrink: 0;
 }
-header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
-#date-display { color: var(--text-sub); font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; }
+header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light); }
+#date-display { color: var(--text-sub-light); font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; }
 
 .user-avatar {
     width: 40px;
@@ -193,14 +210,18 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
     align-items: center;
     justify-content: center;
 }
-.stat-label { font-size: 0.7rem; color: #9ca3af; font-weight: 700; }
-.stat-val { font-size: 1.125rem; font-weight: 700; }
+.stat-label { font-size: 0.7rem; color: #484f5b; font-weight: 700; }
+.stat-val { font-size: 1.125rem;color: #000000; font-weight: 700; }
 
 .bg-orange { background: #ffedd5; color: #f97316; }
 .bg-blue   { background: #dbeafe; color: #3b82f6; }
 
 /* Devices Grid */
-.section-title { font-size: 1.125rem; font-weight: 700; margin-bottom: 1rem; }
+.section-title { 
+    color: var(--text-main-light);
+    font-size: 1.125rem; 
+    font-weight: 700; 
+    margin-bottom: 1rem; }
 
 .device-grid {
     display: grid;
@@ -248,10 +269,10 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
     font-size: 1.25rem;
     transition: background 0.3s, color 0.3s;
 }
-.icon-off { background: #f3f4f6; color: #9ca3af; }
+.icon-off { background: #f3f4f6; color: #424242; }
 .icon-on  { background: var(--primary-color); color: white; }
 
-.device-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.25rem; color: #374151; }
+.device-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.25rem; color: #000000; }
 .device-status { font-size: 0.75rem; font-weight: 700; }
 .text-on { color: var(--primary-color); }
 .text-off { color: var(--text-sub); }
@@ -280,7 +301,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
     padding: 8px;
     z-index: 10;
     font-size: 1.1rem;
-    background: rgba(255, 255, 255, 0.5);
+    /* background: rgba(255, 255, 255, 0.5); */
     border-radius: 50%;
     width: 35px; height: 35px;
     display: flex; align-items: center; justify-content: center;
@@ -318,9 +339,10 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
 .bottom-nav {
     position: fixed;
     bottom: 0; left: 0; width: 100%;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    border-top: 1px solid #e5e7eb;
+        background: linear-gradient(15deg, #142850, #14365f, #13476f, #125d80);
+    /* background: rgba(255, 255, 255, 0); */
+    /* backdrop-filter: blur(10px); */
+    /* border-top: 1px solid #e5e7eb; */
     padding: 0.5rem 1.5rem 1.5rem 1.5rem;
     z-index: 50;
 }
@@ -358,10 +380,10 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
 }
 @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-header { display: flex; justify-content: space-between;color: var(--text-main-dark); align-items: center; margin-bottom: 20px; }
 .close-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666; }
 
-.modal-section { margin-bottom: 20px; }
+.modal-section {margin-top: 10px; margin-bottom: 20px;color: var(--text-main-dark); }
 .modal-section label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
 
 /* Input with Icon */
@@ -379,7 +401,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
     padding: 10px; border: 1px solid #eee; border-radius: 10px;
     cursor: pointer; font-size: 0.75rem; color: #666; transition: 0.2s;
 }
-.type-option:hover { background: #f3f4f6; }
+.type-option:hover { background: #b9b9b9; }
 .type-option.selected { background: #eff6ff; border-color: var(--primary-color); color: var(--primary-color); }
 
 /* Timer Inputs */
@@ -440,7 +462,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
 }
 
 .profile-info { display: flex; flex-direction: column; }
-.username { font-weight: 700; font-size: 1.1rem; color: var(--text-main); }
+.username { font-weight: 700; font-size: 1.1rem; color: var(--text-main-dark); }
 .role { font-size: 0.8rem; color: var(--text-sub); }
 
 .settings-btn {

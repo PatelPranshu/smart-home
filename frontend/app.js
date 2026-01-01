@@ -15,7 +15,7 @@ const path = window.location.pathname;
 // ==========================================
 const style = document.createElement('style');
 style.innerHTML = `
-  .toast-container { position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 10px; }
+  .toast-container { position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 10px; color: #111111ff; }
   .toast { min-width: 250px; padding: 16px; border-radius: 12px; background: white; box-shadow: 0 5px 15px rgba(0,0,0,0.15); display: flex; align-items: center; animation: slideIn 0.3s ease; border-left: 6px solid #333; font-family: 'Inter', sans-serif; font-size: 0.95rem; font-weight: 500; }
   .toast.success { border-color: #22c55e; } .toast.success i { color: #22c55e; }
   .toast.error { border-color: #ef4444; } .toast.error i { color: #ef4444; }

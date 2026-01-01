@@ -26,9 +26,7 @@ app.set('trust proxy', 1);
 
 //CORS HERE ---
 app.use(cors({
-  origin: ["https://smart-home-lovat.vercel.app",
-    process.env.ORIGIN_URL
-  ].filter(Boolean),
+  origin: [process.env.ORIGIN_URL,"https://oauth-redirect.googleusercontent.com"].filter(Boolean),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
   credentials: true
