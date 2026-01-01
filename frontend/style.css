@@ -35,7 +35,9 @@
   -ms-user-select: none;     /* Internet Explorer/Edge */
     
 }
-
+html, body {
+    height: 100%;
+}
 body {
    /* background-image: linear-gradient(180deg, #020024 0%, #090979 35%,#090979 70%, #00d4ff 100%); */
    /* background-image: linear-gradient(180deg, #020024 0%, #090979 70%, #0190ac 100%); */
@@ -45,9 +47,11 @@ body {
     background-size: cover;
     background-position: center;
     color: var(--text-main-light);
-    height: 100dvh;
+    min-height: 100vh;
+    height: 100%;
     width: 100vw;
-    overflow: hidden; /* Prevents whole page scroll */
+    overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
 }
@@ -154,7 +158,8 @@ body {
 .dashboard-container {
     display: flex;
     flex-direction: column;
-    height: 100dvh; /* Force full viewport height */
+    min-height: 100vh;
+    height: 100%;
     width: 100%;
     overflow: hidden; /* Prevent body scroll */
 }
@@ -194,6 +199,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     overflow: hidden; /* Stop this container from scrolling */
     padding: 0 1.5rem; /* Standard side padding */
     margin-bottom: 10px; /* Optional: Small gap between devices and nav */
+        padding-bottom: 90px;
 }
 
 /* Stats Cards (Home) */
@@ -365,24 +371,15 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 
 /* --- 7. BOTTOM NAVIGATION --- */
 .bottom-nav {
-    position: relative; 
+    position: fixed;      
+    bottom: 0;
+    left: 0;
     width: 100%;
-    background: transparent; 
-    border: none;
-    z-index: 50;
-    flex-shrink: 0;
-
-    /* --- UPDATE THIS SECTION --- */
-    /* Old padding: padding: 0.5rem 1.5rem 1.5rem 1.5rem; */
-    
-    /* New padding that respects the phone's safe area */
-    padding-top: 0.5rem;
-    padding-left: 1.5rem;
-    padding-right: 1.5rem;
-    
-    /* 1.5rem + the system safe area height */
-    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); 
+    z-index: 100;
+    background: transparent;
+    padding: 0.5rem 1.5rem 1.2rem;
 }
+
 .nav-inner {
     display: flex; justify-content: space-between;
     max-width: 500px; margin: 0 auto;
