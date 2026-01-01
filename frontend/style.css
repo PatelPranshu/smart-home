@@ -353,7 +353,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 .nav-btn {
     background: none; border: none;
     display: flex; flex-direction: column; align-items: center;
-    gap: 4px; color: var(--text-sub);
+    gap: 4px; color: var(--text-main-light);
     font-size: 0.7rem; font-weight: 600;
     cursor: pointer; width: 60px;
     text-decoration: none; /* For anchor tags */

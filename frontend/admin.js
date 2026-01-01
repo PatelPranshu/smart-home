@@ -150,4 +150,12 @@ function closeQr() {
     document.getElementById('qr-print-area').style.display = 'none';
 }
 
+// --- 7. LOGOUT FUNCTION ---
+function logout() {
+    // 1. Remove the authentication token
+    localStorage.removeItem('token');
+    
+    // 2. Redirect to the login page
+    window.location.href = 'index.html';
+}
 // REMOVED: "if(ADMIN_KEY) loadData();" line because loadData() is already called at the top.
