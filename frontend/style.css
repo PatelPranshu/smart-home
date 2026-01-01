@@ -199,7 +199,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     overflow: hidden; /* Stop this container from scrolling */
     padding: 0 1.5rem; /* Standard side padding */
     margin-bottom: 75px; /* Optional: Small gap between devices and nav */
-    /* padding-bottom: 90px; */
+    padding-bottom: 90px;
 }
 
 /* Stats Cards (Home) */
