@@ -190,18 +190,17 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 
 /* --- 5. MAIN CONTENT AREA --- */
 .content-area {
-    flex: 1; /* Takes all available space between header and nav */
+    flex: 1;
     display: flex; 
     flex-direction: column;
-    
-    /* DEFAULT: Allow scrolling (For Settings & Energy pages) */
     overflow-y: auto; 
+    padding: 0 1.5rem; 
     
-    padding: 0 1.5rem; /* Side padding */
-    padding-bottom: 0; /* Nav is relative now, no bottom padding needed */
+    /* CHANGED: Add padding so content isn't hidden behind the fixed nav */
+    padding-bottom: 100px; 
+    
     position: relative;
 }
-
 /* SPECIAL CLASS: Add this to home.html content-area to lock stats at top */
 .content-area.no-scroll {
     overflow: hidden; 
@@ -257,12 +256,12 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     grid-template-columns: repeat(2, 1fr);
     gap: 1rem;
     
-    /* SCROLLING LOGIC */
-    flex: 1;           /* Fill remaining height */
-    overflow-y: auto;  /* Scroll ONLY inside this box */
-    padding-bottom: 20px; /* Space at bottom of list */
+    flex: 1;           
+    overflow-y: auto;  
     
-    /* Hide Scrollbar */
+    /* CHANGED: Increase padding to clear the floating navbar */
+    padding-bottom: 120px; 
+    
     -ms-overflow-style: none;
     scrollbar-width: none;
 }
@@ -380,17 +379,22 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 
 
 /* --- 7. BOTTOM NAVIGATION --- */
+/* --- 7. BOTTOM NAVIGATION --- */
 .bottom-nav {
-    /* STACKED LAYOUT (Relative) - Never covers content */
-    position: relative;
+    /* CHANGED: Use fixed to stick to screen bottom regardless of browser bars */
+    position: fixed; 
+    bottom: 0;
+    left: 0;
+    right: 0;
+    
     z-index: 100;
     width: 100%;
-    background: transparent;
     
-    /* Padding to look good on phones with home bars (iPhone/Android Gestures) */
+    /* Optional: Add a subtle background gradient so text behind it doesn't clash */
+    background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+    
+    /* Padding for iPhone Home Bar / Android Gestures */
     padding: 0.5rem 1.5rem calc(1rem + env(safe-area-inset-bottom)) 1.5rem;
-    
-    flex-shrink: 0; /* Prevents it from getting squashed */
 }
 
 .nav-inner {
