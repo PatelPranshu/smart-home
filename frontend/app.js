@@ -3,8 +3,8 @@
 // ==========================================
 
 // Determine API URL (Localhost vs Render)
-const API_URL = 'http://localhost:3000/api';
-// const API_URL = 'https://smart-home-04m4.onrender.com/api';
+// const API_URL = 'http://localhost:3000/api';
+const API_URL = 'https://smart-home-04m4.onrender.com/api';
 
 // Global State
 const token = localStorage.getItem('token');
