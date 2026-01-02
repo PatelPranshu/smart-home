@@ -154,15 +154,11 @@ body {
 }
 
 /* --- 4. DASHBOARD LAYOUT (Shared) --- */
-/* --- 4. DASHBOARD LAYOUT (Shared) --- */
 .dashboard-container {
     display: flex;
     flex-direction: column;
-    
-    /* FORCE height to be the dynamic viewport height */
-    height: 100dvh; 
+    height: 100%; /* Fills the body's 100dvh */
     width: 100%;
-    
     overflow: hidden; 
     position: relative;
 }
@@ -193,22 +189,16 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 }
 
 /* --- 5. MAIN CONTENT AREA --- */
-/* --- 5. MAIN CONTENT AREA --- */
 .content-area {
-    /* Flex: 1 makes this take up ALL available space */
-    flex: 1; 
-    
+    flex: 1;
     display: flex; 
     flex-direction: column;
-    
-    /* Scroll ONLY inside this area */
     overflow-y: auto; 
+    padding: 0 1.5rem; 
     
-    /* Standard padding */
-    padding: 0 1.5rem 1.5rem 1.5rem; 
-    
-    /* REMOVED: No bottom margin needed now */
-    margin-bottom: 0; 
+    /* CHANGED: Add padding so content isn't hidden behind the fixed nav */
+    /* padding-bottom: 100px;  */
+    margin-bottom: 70px;    
     
     position: relative;
 }
@@ -392,24 +382,23 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 /* --- 7. BOTTOM NAVIGATION --- */
 /* --- 7. BOTTOM NAVIGATION --- */
 .bottom-nav {
-    /* CHANGED: Relative places it naturally at the bottom of the flex column */
-    position: relative; 
+    /* CHANGED: Use fixed to stick to screen bottom regardless of browser bars */
+    position: fixed; 
+    bottom: 0;
+    left: 0;
+    right: 0;
+    
     z-index: 100;
     width: 100%;
     
-    /* KEY FIX: Transparent background lets the body image show through */
-    background: linear-gradient(90deg, rgb(149, 108, 172), rgb(63, 184, 198)); 
+    /* Optional: Add a subtle background gradient so text behind it doesn't clash */
+    /* background: linear-gradient(to top, rgb(0, 0, 0) 0%, rgba(0, 0, 0, 0.721) 50%, rgba(0, 0, 0, 0.477) 75%, rgba(0, 0, 0, 0) 100%); */
+        background: linear-gradient(90deg, rgb(149, 108, 172), rgb(63, 184, 198)); 
     
-    /* Prevent the navbar from shrinking if content is large */
-    flex-shrink: 0; 
-    
-    /* Optional: Slight blur for a premium glass feel (like your image) */
-    backdrop-filter: blur(5px);
-    -webkit-backdrop-filter: blur(5px);
-
     /* Padding for iPhone Home Bar / Android Gestures */
     padding: 0.5rem 1.5rem calc(1rem + env(safe-area-inset-bottom)) 1.5rem;
 }
+
 .nav-inner {
     display: flex; justify-content: space-between;
     max-width: 500px; margin: 0 auto;
