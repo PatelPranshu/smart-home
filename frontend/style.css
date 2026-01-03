@@ -261,7 +261,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     overflow-y: auto;  
     
     /* CHANGED: Increase padding to clear the floating navbar */
-    padding-bottom: 120px; 
+    padding-bottom: 160px; 
     
     -ms-overflow-style: none;
     scrollbar-width: none;
