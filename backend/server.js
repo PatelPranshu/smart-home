@@ -407,6 +407,33 @@ app.post('/api/claim-device', auth, async (req, res) => {
         res.status(500).json({ error: "Server Error during claiming." });
     }
 });
+// Remove/Unclaim a Device (User Action)
+app.post('/api/remove-device', auth, async (req, res) => {
+    const { deviceId } = req.body;
+    try {
+        // Find device owned by this user
+        const device = await Device.findOne({ deviceId: deviceId, owner: req.user.id });
+        
+        if (!device) {
+            return res.status(404).json({ error: "Device not found or not owned by you." });
+        }
+
+        // Remove ownership
+        device.owner = null;
+        
+        // Reset switch states for safety
+        device.switches.forEach(sw => sw.state = false);
+        
+        await device.save();
+
+        console.log(`User ${req.user.id} removed device ${deviceId}`);
+        res.json({ status: 'removed' });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
 
 // Toggle Switch
 app.post('/api/control', auth, [
