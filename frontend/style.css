@@ -27,11 +27,11 @@
     margin: 0;
     padding: 0;
     font-family: 'Inter', sans-serif;
-    /* -webkit-tap-highlight-color: transparent;
+    -webkit-tap-highlight-color: transparent;
     user-select: none;
     -webkit-user-select: none;
     -moz-user-select: none;
-    -ms-user-select: none; */
+    -ms-user-select: none;
 }
 
 html, body {
