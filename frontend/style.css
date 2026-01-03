@@ -27,11 +27,11 @@
     margin: 0;
     padding: 0;
     font-family: 'Inter', sans-serif;
-    -webkit-tap-highlight-color: transparent;
+    /* -webkit-tap-highlight-color: transparent;
     user-select: none;
     -webkit-user-select: none;
     -moz-user-select: none;
-    -ms-user-select: none;
+    -ms-user-select: none; */
 }
 
 html, body {
@@ -198,7 +198,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     
     /* CHANGED: Add padding so content isn't hidden behind the fixed nav */
     /* padding-bottom: 100px;  */
-    margin-bottom: 70px;    
+    padding-bottom: 100px;    
     
     position: relative;
 }
@@ -592,3 +592,209 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 }
 input:checked + .slider { background-color: #4CAF50; }
 input:checked + .slider:before { transform: translateX(24px); }
+
+
+/* --- NEW MODERN SETTINGS STYLES --- */
+
+/* 1. Device List Stack */
+.device-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.device-list-card {
+    background: white;
+    padding: 15px;
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+.device-list-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    border-color: #e5e7eb;
+}
+
+.device-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.device-icon-small {
+    width: 42px;
+    height: 42px;
+    background: #f3f4f6;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4b5563;
+    font-size: 1.1rem;
+}
+
+.device-details {
+    display: flex;
+    flex-direction: column;
+}
+.device-id-text {
+    font-weight: 600;
+    color: #1f2937;
+    font-size: 0.95rem;
+}
+.device-status-dot {
+    font-size: 0.75rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 2px;
+}
+
+.btn-remove {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: none;
+    background: #fee2e2;
+    color: #ef4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.btn-remove:hover {
+    background: #ef4444;
+    color: white;
+}
+
+/* 2. Action Grid (Side-by-Side Buttons) */
+.action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.action-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 15px;
+    height: auto; /* Override old height */
+    text-align: left;
+    gap: 12px;
+}
+
+.action-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+}
+.action-icon.green { background: #dcfce7; color: #16a34a; }
+.action-icon.blue { background: #dbeafe; color: #2563eb; }
+
+.action-text {
+    display: flex;
+    flex-direction: column;
+}
+.action-text .main { font-weight: 600; font-size: 0.95rem; color: #111827; }
+.action-text .sub { font-size: 0.75rem; color: #6b7280; margin-top: 2px; }
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 30px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 16px;
+    border: 2px dashed #cbd5e1;
+    color: #94a3b8;
+}
+.empty-state i { font-size: 2rem; margin-bottom: 10px; display: block; }
+
+
+
+
+
+
+/* --- UNIFIED SETTINGS LIST STYLES --- */
+
+.settings-card-list {
+    background: white;
+    border-radius: 16px;
+    overflow: hidden; /* Ensures children don't overflow rounded corners */
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    display: flex;
+    flex-direction: column;
+}
+
+/* Common style for both Devices and Buttons in the list */
+.list-item, .list-item-btn {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 20px;
+    background: white;
+    border: none;
+    border-bottom: 1px solid #f3f4f6;
+    width: 100%;
+    text-align: left;
+    transition: background 0.2s;
+}
+
+.list-item:last-child, .list-item-btn:last-child {
+    border-bottom: none; /* Remove border for the last item */
+}
+
+.list-item-btn { cursor: pointer; }
+.list-item-btn:hover { background: #f9fafb; }
+
+/* Content Layout */
+.btn-content {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.list-info {
+    display: flex;
+    flex-direction: column;
+}
+.list-title { font-weight: 600; font-size: 0.95rem; color: #1f2937; }
+.list-sub   { font-size: 0.8rem; color: #6b7280; display: flex; align-items: center; gap: 5px;}
+
+/* Icons */
+.icon-box {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+}
+.icon-box.gray  { background: #f3f4f6; color: #4b5563; }
+.icon-box.green { background: #dcfce7; color: #16a34a; }
+.icon-box.blue  { background: #dbeafe; color: #2563eb; }
+
+/* Remove Button (Trash Icon) */
+.btn-trash {
+    background: #fee2e2;
+    color: #ef4444;
+    border: none;
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.btn-trash:hover { background: #ef4444; color: white; }
+
+.arrow { color: #d1d5db; font-size: 0.9rem; }
+.list-item-placeholder { padding: 20px; text-align: center; color: #999; font-size: 0.9rem;}

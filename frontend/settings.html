@@ -45,21 +45,37 @@
             <div class="settings-group" style="margin-top: 25px;">
                 <h3 class="group-title">Device Management</h3>
                 
-                <button class="settings-btn" onclick="openClaimModal()">
-                    <div class="btn-text">
-                        <i class="fa-solid fa-circle-plus" style="color: #4CAF50;"></i>
-                        <span>Add New Device</span>
+                <div class="settings-card-list">
+                    <div id="settings-device-list">
+                        <div class="list-item-placeholder">Loading...</div>
                     </div>
-                    <i class="fa-solid fa-chevron-right"></i>
-                </button>
 
-                <button class="settings-btn" onclick="openVerifyPassModal()">
-                    <div class="btn-text">
-                        <i class="fa-solid fa-wifi"></i>
-                        <span>Change Wi-Fi ID/Password</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-right"></i>
-                </button>
+                    <button class="list-item-btn add-btn" onclick="openClaimModal()">
+                        <div class="btn-content">
+                            <div class="icon-box green">
+                                <i class="fa-solid fa-plus"></i>
+                            </div>
+                            <span>Add New Device</span>
+                        </div>
+                        <i class="fa-solid fa-chevron-right arrow"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="settings-group" style="margin-top: 25px;">
+                <h3 class="group-title">Network Settings</h3>
+                
+                <div class="settings-card-list">
+                    <button class="list-item-btn" onclick="openVerifyPassModal()">
+                        <div class="btn-content">
+                            <div class="icon-box blue">
+                                <i class="fa-solid fa-wifi"></i>
+                            </div>
+                            <span>Change Wi-Fi ID/Password</span>
+                        </div>
+                        <i class="fa-solid fa-chevron-right arrow"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="settings-group" style="margin-top: 25px;">
@@ -196,6 +212,21 @@
         </div>
     </div>
 
+    
+<div id="modal-remove-verify" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Confirm Removal</h3>
+                <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p style="margin-bottom:15px; color:#666; font-size:0.9rem;">
+                Enter your login password to permanently remove this device.
+            </p>
+            
+            <input type="password" id="input-remove-pass" placeholder="Your Password" class="input-field">
+            <button onclick="submitDeviceRemoval()" class="btn-primary" style="margin-top:10px; background-color: #ef4444;">Remove Device</button>
+        </div>
+    </div>
     <script src="app.js"></script>
 </body>
 </html>

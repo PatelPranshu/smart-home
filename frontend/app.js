@@ -377,6 +377,110 @@ async function initSettings() {
         document.getElementById('modal-claim-device').classList.remove('hidden');
     };
 
+// --- NEW: Load User's Devices List ---
+    async function loadSettingsDevices() {
+        const container = document.getElementById('settings-device-list');
+        if(!container) return;
+
+        try {
+            const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
+            const devices = await res.json();
+
+            container.innerHTML = ''; 
+
+            if (devices.length === 0) {
+                // Do not show empty text, just leave it empty so "Add Device" is the only item
+                return;
+            }
+
+            devices.forEach(d => {
+                const item = document.createElement('div');
+                item.className = 'list-item'; // Uses new CSS class
+                
+                const statusColor = d.isOnline ? '#22c55e' : '#ef4444';
+                const statusText = d.isOnline ? 'Online' : 'Offline';
+
+                item.innerHTML = `
+                    <div class="btn-content">
+                        <div class="icon-box gray">
+                            <i class="fa-solid fa-microchip"></i>
+                        </div>
+                        <div class="list-info">
+                            <span class="list-title">${d.deviceId}</span>
+                            <span class="list-sub">
+                                <i class="fa-solid fa-circle" style="font-size:0.5rem; color:${statusColor}"></i> ${statusText}
+                            </span>
+                        </div>
+                    </div>
+                    <button class="btn-trash" onclick="initRemoveDevice('${d.deviceId}')" title="Remove Device">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                `;
+                container.appendChild(item);
+            });
+
+        } catch(err) {
+            container.innerHTML = '<div style="padding:15px; color:red; text-align:center;">Error loading devices</div>';
+        }
+    }
+
+    // Load immediately
+    loadSettingsDevices();
+
+
+    // --- REMOVE DEVICE LOGIC ---
+    window.deviceToRemove = null;
+
+    // 1. Click Trash Icon -> Open Modal
+    window.initRemoveDevice = (deviceId) => {
+        window.deviceToRemove = deviceId;
+        document.getElementById('input-remove-pass').value = "";
+        document.getElementById('modal-remove-verify').classList.remove('hidden');
+    };
+
+    // 2. Click "Remove" in Modal -> Verify & Delete
+    window.submitDeviceRemoval = async () => {
+        const password = document.getElementById('input-remove-pass').value;
+        
+        if (!password) {
+            showToast("Please enter your password", "warning");
+            return;
+        }
+
+        try {
+            // Step A: Verify Password
+            const resVerify = await fetch(`${API_URL}/verify-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ password })
+            });
+
+            if (!resVerify.ok) {
+                showToast("Incorrect Password", "error");
+                return;
+            }
+
+            // Step B: Remove Device
+            const resRemove = await fetch(`${API_URL}/remove-device`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ deviceId: window.deviceToRemove })
+            });
+
+            if (resRemove.ok) {
+                showToast("Device Removed Successfully", "success");
+                window.closeModals();
+                loadSettingsDevices(); // Refresh List
+            } else {
+                showToast("Failed to remove device", "error");
+            }
+        } catch(err) {
+            showToast("Server Error", "error");
+        }
+    };
+
+
+    // --- UPDATE: Refresh list after adding a device ---
     window.submitClaimDevice = async () => {
         const deviceId = document.getElementById('claim-id').value.trim();
         const secretCode = document.getElementById('claim-code').value.trim();
@@ -395,12 +499,12 @@ async function initSettings() {
             if (res.ok && data.status === 'success') {
                 showToast("Device Added Successfully!", "success");
                 window.closeModals();
-                // Optional: Refresh list if we were on a page that showed devices
+                loadSettingsDevices(); // REFRESH LIST HERE
             } else {
                 showToast(data.error || "Failed to add device", "error");
             }
         } catch (err) {
-            showToast("Server Error during Claiming", "error");
+            showToast("Server Error", "error");
         }
     };
 
