@@ -21,7 +21,12 @@ const DeviceSchema = new mongoose.Schema({
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, 
   
   isOnline: { type: Boolean, default: false },
+ 
+  //sensor fields
+  temperature: { type: Number, default: 0 },
+  humidity: { type: Number, default: 0 },
   
+
   switches: [SwitchSchema]
 });
 

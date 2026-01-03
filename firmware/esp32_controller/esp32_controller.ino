@@ -5,6 +5,11 @@
 #include <Preferences.h>
 #include <WiFiManager.h> 
 #include <time.h>
+#include <DHT.h> 
+
+#define DHTPIN 13     // Pin where DHT11 is connected
+#define DHTTYPE DHT11 // Sensor type
+DHT dht(DHTPIN, DHTTYPE); 
 
 // --- CONFIGURATION ---
 
@@ -54,11 +59,21 @@ String commandTopic;
 String updateTopic;
 String syncTopic;
 String statusTopic;
+String sensorTopic; 
 String wifiTopic; 
 unsigned long lastWifiCheck = 0; 
 
+// CONFIGURATION: Thresholds
+const float TEMP_THRESHOLD = 0.5; // Update if temp changes by 0.5°C
+const float HUM_THRESHOLD = 5.0;  // Update if humidity changes by 5%
+
+// [FIXED] Renamed 'lastDhtRead' to 'lastDhtCheck' to match loop logic
+unsigned long lastDhtCheck = 0;   
+float lastTemp = 0;
+float lastHum = 0;
+
 // --- PINS ---
-const int NUM_RELAYS = 8;
+const int NUM_RELAYS = 9;
 const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32};
 const int switchPins[NUM_RELAYS] = {15, 4, 16, 17, 5, 18, 19, 21};
 const int STATUS_LED = 2;
@@ -352,6 +367,9 @@ void setup() {
   syncTopic = "devices/" + uniqueDeviceId + "/sync";
   statusTopic = "devices/" + uniqueDeviceId + "/status";
   wifiTopic = "devices/" + uniqueDeviceId + "/wifi";
+  sensorTopic = "devices/" + uniqueDeviceId + "/sensor"; 
+
+  dht.begin(); // Start Sensor
 
   // --- WIFIMANAGER SETUP ---
   WiFiManager wm;
@@ -413,7 +431,7 @@ void handleMQTT() {
     // 2. LWT (Dead Man's Switch) Configuration
     const char* willTopic = statusTopic.c_str();
     const char* willMsg = "offline";
-    int willQoS = 1;        // CHANGED: QoS 1 ensures the Broker saves the message
+    int willQoS = 1;        // QoS 1 ensures the Broker saves the message
     bool willRetain = true; // KEEP: True ensures the App sees "Offline" instantly
     
     // 3. Connect using the Fleet Credentials + LWT
@@ -471,26 +489,63 @@ void loop() {
       checkWiFiConnection(); 
       handleLedStatus(); 
       
-      if (WiFi.status() == WL_CONNECTED) {
-          if (client.connected()) {
-              for(int i=0; i<NUM_RELAYS; i++) {
-                 if (mqttNeedsUpdate[i]) {
-                     mqttNeedsUpdate[i] = false;
-                     StaticJsonDocument<256> doc;
-                     doc["switchId"] = i;
-                     doc["state"] = relayState[i];
-                     char buffer[256];
-                     serializeJson(doc, buffer);
-                     client.publish(updateTopic.c_str(), buffer);
-                 }
-              }
-              if (millis() - lastHeartbeat > 30000) {
-                 lastHeartbeat = millis();
-                 client.publish(statusTopic.c_str(), "online", true);
-              }
-              client.loop();
-          }
-          handleMQTT(); 
-      }
+      // [NEW] SMART SENSOR LOGIC
+      // 1. Read sensor every 2 seconds (DHT11 is slow, don't read faster than this)
+      if (millis() - lastDhtCheck > 2000) {
+        lastDhtCheck = millis();
+
+        float currentTemp = dht.readTemperature();
+        float currentHum = dht.readHumidity();
+
+        // 2. Check if read was successful
+        if (!isnan(currentTemp) && !isnan(currentHum)) {
+            
+            // 3. COMPARE: Has data changed by 0.5C or 5%?
+            float tempDiff = abs(currentTemp - lastTemp);
+            float humDiff = abs(currentHum - lastHum);
+
+            if (tempDiff >= TEMP_THRESHOLD || humDiff >= HUM_THRESHOLD) {
+                
+                // 4. Update "Last" values
+                lastTemp = currentTemp;
+                lastHum = currentHum;
+
+                // 5. Publish to Server
+                if (WiFi.status() == WL_CONNECTED && client.connected()) {
+                    StaticJsonDocument<128> doc;
+                    doc["temp"] = currentTemp;
+                    doc["hum"] = currentHum;
+                    char buffer[128];
+                    serializeJson(doc, buffer);
+                    
+                    client.publish(sensorTopic.c_str(), buffer);
+                    
+                    Serial.printf("[DHT] UPDATE SENT: %.1f°C | %.0f%%\n", currentTemp, currentHum);
+                }
+            }
+        }
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+        if (client.connected()) {
+            for(int i=0; i<NUM_RELAYS; i++) {
+               if (mqttNeedsUpdate[i]) {
+                   mqttNeedsUpdate[i] = false;
+                   StaticJsonDocument<256> doc;
+                   doc["switchId"] = i;
+                   doc["state"] = relayState[i];
+                   char buffer[256];
+                   serializeJson(doc, buffer);
+                   client.publish(updateTopic.c_str(), buffer);
+               }
+            }
+            if (millis() - lastHeartbeat > 30000) {
+               lastHeartbeat = millis();
+               client.publish(statusTopic.c_str(), "online", true);
+            }
+            client.loop();
+        }
+        handleMQTT(); 
+    }
   }
 }

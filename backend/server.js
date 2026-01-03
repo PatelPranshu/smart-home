@@ -115,6 +115,7 @@ mqttClient.on('connect', () => {
   mqttClient.subscribe('devices/+/update'); // Listener for manual flips
   mqttClient.subscribe('devices/+/sync');   // Listener for reboots
   mqttClient.subscribe('devices/+/status'); // Listen for Online/Offline
+  mqttClient.subscribe('devices/+/sensor'); // Subscribe to sensor data
 });
 
 // Handle MQTT Messages
@@ -232,6 +233,17 @@ mqttClient.on('message', async (topic, message) => {
             }
         } catch (err) { console.error("Status Report Error:", err); }
     }
+  }
+  // Handle Sensor Data
+  if (type === 'sensor') {
+      try {
+          const data = JSON.parse(message.toString());
+          // Update DB directly
+          await Device.updateOne(
+              { deviceId: deviceId },
+              { $set: { temperature: data.temp, humidity: data.hum } }
+          );
+      } catch (err) { console.error("Sensor Data Error:", err); }
   }
 });
 
@@ -713,14 +725,17 @@ app.get('/api/admin/devices', auth, verifyAdmin, async (req, res) => {
 
 // Create New Device (The Factory Process)
 app.post('/api/admin/create', auth, verifyAdmin, async (req, res) => {
-    const { deviceId, secretCode } = req.body;
+    // [CHANGE] Accept 'switchCount' from the request
+    const { deviceId, secretCode, switchCount } = req.body;
     
     try {
         const existing = await Device.findOne({ deviceId });
         if (existing) return res.status(400).json({ error: "Device ID already exists!" });
 
-        // Create with default 8 switches
-        const defaultSwitches = Array.from({ length: 8 }, (_, i) => ({
+        // [CHANGE] Use the provided switchCount (default to 8 if not sent)
+        const count = switchCount || 8; 
+
+        const defaultSwitches = Array.from({ length: count }, (_, i) => ({
             id: i, name: `Switch ${i + 1}`, state: false, type: 'light'
         }));
 
