@@ -120,130 +120,146 @@ mqttClient.on('connect', () => {
 
 // Handle MQTT Messages
 mqttClient.on('message', async (topic, message) => {
-  const parts = topic.split('/');
-  const deviceId = parts[1];
-  const type = parts[2]; 
+  // [CRITICAL] Global try-catch to prevent server crashes on bad data
+  try {
+      const parts = topic.split('/');
+      
+      // Safety Check: Ensure topic format is correct (devices/ID/type)
+      if (parts.length < 3) return;
 
-// User flipped physical switch -> Update DB
-  if (type === 'update') {
-    const data = JSON.parse(message.toString());
-    
-    let updateFields = { "switches.$.state": data.state };
+      const deviceId = parts[1];
+      const type = parts[2]; 
 
-    if (data.state) {
-        // If turned ON, start tracking time
-        updateFields["switches.$.lastOnTime"] = new Date();
-    } else {
-        // If turned OFF, stop tracking time and cancel any auto-off timer
-        updateFields["switches.$.lastOnTime"] = null;
-        updateFields["switches.$.timerExpiresAt"] = null;
-    }
+      // -------------------------------------------------
+      // 1. User flipped physical switch -> Update DB
+      // -------------------------------------------------
+      if (type === 'update') {
+          const data = JSON.parse(message.toString()); // If this fails, catch block handles it
+          
+          let updateFields = { "switches.$.state": data.state };
 
-    //Update Device State
-    await Device.updateOne(
-      { deviceId: deviceId, "switches.id": data.switchId },
-      { $set: updateFields }
-    );
+          if (data.state) {
+              // If turned ON, start tracking time
+              updateFields["switches.$.lastOnTime"] = new Date();
+          } else {
+              // If turned OFF, stop tracking time and cancel any auto-off timer
+              updateFields["switches.$.lastOnTime"] = null;
+              updateFields["switches.$.timerExpiresAt"] = null;
+          }
 
-    // FETCH DEVICE (for History AND Google Report)
-    try {
-        const device = await Device.findOne({ deviceId });
-        if(device) {
-            const sw = device.switches.find(s => s.id === data.switchId);
-            await History.create({
-                owner: device.owner,
-                deviceId: deviceId,
-                switchName: sw ? sw.name : `Switch ${data.switchId}`,
-                action: data.state ? "Turned ON (Physical)" : "Turned OFF (Physical)",
-                timestamp: new Date()
+          // Update Device State
+          await Device.updateOne(
+            { deviceId: deviceId, "switches.id": data.switchId },
+            { $set: updateFields }
+          );
+
+          // FETCH DEVICE (for History AND Google Report)
+          const device = await Device.findOne({ deviceId });
+          if(device) {
+              const sw = device.switches.find(s => s.id === data.switchId);
+              
+              // Log to History
+              await History.create({
+                  owner: device.owner,
+                  deviceId: deviceId,
+                  switchName: sw ? sw.name : `Switch ${data.switchId}`,
+                  action: data.state ? "Turned ON (Physical)" : "Turned OFF (Physical)",
+                  timestamp: new Date()
+              });
+
+              // REPORT STATE TO GOOGLE
+              if (device.owner) {
+                  await appSmartHome.reportState({
+                      agentUserId: device.owner.toString(),
+                      requestId: Math.random().toString(),
+                      payload: {
+                          devices: {
+                              states: {
+                                  [`${deviceId}-${data.switchId}`]: {
+                                      on: data.state,
+                                      online: device.isOnline || true
+                                  }
+                              }
+                          }
+                      }
+                  });
+                  console.log(`Reported physical state change to Google for ${deviceId}`);
+              }
+          }
+      }
+
+      // -------------------------------------------------
+      // 2. Device Rebooted -> Restore State
+      // -------------------------------------------------
+      else if (type === 'sync') {
+          console.log(`Device ${deviceId} rebooted. Restoring state...`);
+          const device = await Device.findOne({ deviceId });
+          if (device) {
+            device.switches.forEach(sw => {
+              const payload = JSON.stringify({ switchId: sw.id, state: sw.state });
+              mqttClient.publish(`devices/${deviceId}/command`, payload);
             });
-        }
+          }
+      }
 
-        // REPORT STATE TO GOOGLE
-        if (device.owner) {
-                await appSmartHome.reportState({
-                    agentUserId: device.owner.toString(),
-                    requestId: Math.random().toString(),
-                    payload: {
-                        devices: {
-                            states: {
-                                [`${deviceId}-${data.switchId}`]: {
-                                    on: data.state,
-                                    online: device.isOnline || true
-                                }
-                            }
-                        }
-                    }
-                });
-                console.log(`Reported physical state change to Google for ${deviceId}`);
-            }
-    } catch(err) { console.error("Log Error"); }
-  }
+      // -------------------------------------------------
+      // 3. Device Status Change (Online/Offline)
+      // -------------------------------------------------
+      else if (type === 'status') {
+          const status = message.toString().trim();
+          const isOnline = status === 'online';
+          
+          // Check current status in DB
+          const device = await Device.findOne({ deviceId });
 
-  // Device Rebooted -> Restore State
-  else if (type === 'sync') {
-    console.log(`Device ${deviceId} rebooted. Restoring state...`);
-    const device = await Device.findOne({ deviceId });
-    if (device) {
-      device.switches.forEach(sw => {
-        const payload = JSON.stringify({ switchId: sw.id, state: sw.state });
-        mqttClient.publish(`devices/${deviceId}/command`, payload);
-      });
-    }
-  }
+          // Only Log & Update if the status is DIFFERENT (reduces spam)
+          if (device && device.isOnline !== isOnline) {
+              console.log(`Device ${deviceId} is now ${status}`);
+              
+              await Device.updateOne(
+                  { deviceId: deviceId },
+                  { $set: { isOnline: isOnline } }
+              );
 
-  // Device Status Change (Online/Offline)
-  if (type === 'status') {
-    const status = message.toString().trim();
-    const isOnline = status === 'online';
-    
-    // Check current status in DB
-    const device = await Device.findOne({ deviceId });
+              if (device.owner) {
+                  // Build a payload for ALL switches on this board
+                  let statesPayload = {};
+                  device.switches.forEach(sw => {
+                      statesPayload[`${deviceId}-${sw.id}`] = {
+                          online: isOnline 
+                      };
+                  });
 
-    // Only Log & Update if the status is DIFFERENT (reduces spam)
-    if (device && device.isOnline !== isOnline) {
-        console.log(`Device ${deviceId} is now ${status}`);
-        
-        await Device.updateOne(
-            { deviceId: deviceId },
-            { $set: { isOnline: isOnline } }
-        );
+                  await appSmartHome.reportState({
+                      agentUserId: device.owner.toString(),
+                      requestId: Math.random().toString(),
+                      payload: {
+                          devices: {
+                              states: statesPayload
+                          }
+                      }
+                  });
+                  console.log(`Reported connectivity (${status}) to Google`);
+              }
+          }
+      }
 
-        try {
-            if (device.owner) {
-                // Build a payload for ALL switches on this board
-                // (If the board is offline, ALL its switches are offline)
-                let statesPayload = {};
-                device.switches.forEach(sw => {
-                    statesPayload[`${deviceId}-${sw.id}`] = {
-                        online: isOnline 
-                    };
-                });
-
-                await appSmartHome.reportState({
-                    agentUserId: device.owner.toString(),
-                    requestId: Math.random().toString(),
-                    payload: {
-                        devices: {
-                            states: statesPayload
-                        }
-                    }
-                });
-                console.log(`Reported connectivity (${status}) to Google`);
-            }
-        } catch (err) { console.error("Status Report Error:", err); }
-    }
-  }
-  // Handle Sensor Data
-  if (type === 'sensor') {
-      try {
+      // -------------------------------------------------
+      // 4. Handle Sensor Data (Temp/Hum)
+      // -------------------------------------------------
+      else if (type === 'sensor') {
           const data = JSON.parse(message.toString());
           // Update DB directly
           await Device.updateOne(
               { deviceId: deviceId },
               { $set: { temperature: data.temp, humidity: data.hum } }
           );
-      } catch (err) { console.error("Sensor Data Error:", err); }
+      }
+
+  } catch (err) {
+      // [CRITICAL] This catches JSON parse errors and prevents server crash
+      console.error(`[MQTT ERROR] Failed to process message on topic ${topic}:`);
+      console.error(err.message); 
   }
 });
 
@@ -724,18 +740,18 @@ app.get('/api/admin/devices', auth, verifyAdmin, async (req, res) => {
 });
 
 // Create New Device (The Factory Process)
+// Create New Device (Factory Process)
 app.post('/api/admin/create', auth, verifyAdmin, async (req, res) => {
-    // [CHANGE] Accept 'switchCount' from the request
-    const { deviceId, secretCode, switchCount } = req.body;
+    // [UPDATED] Accept channels from body (Default to 9 if not provided)
+    const { deviceId, secretCode, channels } = req.body;
+    const numSwitches = channels || 9; // Default max
     
     try {
         const existing = await Device.findOne({ deviceId });
         if (existing) return res.status(400).json({ error: "Device ID already exists!" });
 
-        // [CHANGE] Use the provided switchCount (default to 8 if not sent)
-        const count = switchCount || 8; 
-
-        const defaultSwitches = Array.from({ length: count }, (_, i) => ({
+        // [UPDATED] Create dynamic number of switches
+        const defaultSwitches = Array.from({ length: numSwitches }, (_, i) => ({
             id: i, name: `Switch ${i + 1}`, state: false, type: 'light'
         }));
 
@@ -766,6 +782,51 @@ app.get('/api/admin/users', auth, verifyAdmin, async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Users failed" }); }
 });
 
+// Admin: Unlink User (Remove owner but keep device)
+app.post('/api/admin/unlink', auth, verifyAdmin, async (req, res) => {
+    const { deviceId } = req.body;
+    try {
+        const device = await Device.findOne({ deviceId });
+        if (!device) return res.status(404).json({ error: "Device not found" });
+
+        device.owner = null;
+        // Reset switches for safety
+        device.switches.forEach(sw => sw.state = false);
+        await device.save();
+
+        res.json({ status: 'unlinked' });
+    } catch (err) { res.status(500).json({ error: "Unlink failed" }); }
+});
+// Admin: Update Device Channels (Resize)
+app.post('/api/admin/device/channels', auth, verifyAdmin, async (req, res) => {
+    const { deviceId, channels } = req.body;
+    const num = parseInt(channels);
+
+    try {
+        const device = await Device.findOne({ deviceId });
+        if (!device) return res.status(404).json({ error: "Device not found" });
+
+        const currentLen = device.switches.length;
+
+        if (num > currentLen) {
+            // EXPAND: Add new switches
+            for (let i = currentLen; i < num; i++) {
+                device.switches.push({
+                    id: i,
+                    name: `Switch ${i + 1}`,
+                    state: false,
+                    type: 'light'
+                });
+            }
+        } else if (num < currentLen) {
+            // SHRINK: Remove switches (Truncate array)
+            device.switches = device.switches.slice(0, num);
+        }
+
+        await device.save();
+        res.json({ status: 'updated', count: device.switches.length });
+    } catch (err) { res.status(500).json({ error: "Update failed" }); }
+});
 
 // GOOGLE ASSISTANT INTEGRATION
 
