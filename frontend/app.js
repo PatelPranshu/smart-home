@@ -640,12 +640,13 @@ async function fetchDevices() {
         const devices = await res.json();
         // Update Temp/Humidity from the first device found (or calculate average)
         if (devices.length > 0) {
-            const d = devices[0]; // Assuming one main controller with sensors
+            // Find the first device that has valid sensor data (non-zero)
+            const sensorDevice = devices.find(d => d.temperature > 0 || d.humidity > 0) || devices[0];
             const tempEl = document.getElementById('temp-display');
             const humEl = document.getElementById('hum-display');
-            
-            if (tempEl && d.temperature) tempEl.innerText = `${d.temperature.toFixed(1)}°C`;
-            if (humEl && d.humidity) humEl.innerText = `${d.humidity.toFixed(0)}%`;
+    
+            if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
+            if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
         }
         renderGrid(devices);
     } catch (err) { console.error("Fetch error", err); }

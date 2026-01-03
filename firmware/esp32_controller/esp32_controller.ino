@@ -64,9 +64,10 @@ String wifiTopic;
 unsigned long lastWifiCheck = 0; 
 
 // CONFIGURATION: Thresholds
-const float TEMP_THRESHOLD = 0.5; // Update if temp changes by 0.5°C
-const float HUM_THRESHOLD = 5.0;  // Update if humidity changes by 5%
-
+// FIX: Set to 0 to send EVERY change (needed for DHT11's low resolution)
+const float TEMP_THRESHOLD = 0.0; 
+// FIX: Lower humidity threshold to 1% to see changes faster
+const float HUM_THRESHOLD = 1.0;
 // [FIXED] Renamed 'lastDhtRead' to 'lastDhtCheck' to match loop logic
 unsigned long lastDhtCheck = 0;   
 float lastTemp = 0;
