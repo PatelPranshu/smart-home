@@ -5,150 +5,431 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - Smart Home Factory</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     
     <style>
-        :root { --primary: #2563eb; --bg: #f3f4f6; --text: #1f2937; --card: #ffffff; }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding-bottom: 50px; }
+        :root { 
+            --primary: #4f46e5; /* Indigo */
+            --primary-hover: #4338ca;
+            --bg: #f3f4f6; 
+            --text-main: #111827; 
+            --text-muted: #6b7280;
+            --card-bg: #ffffff; 
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
 
-        /* HEADER */
-        header { background: #1e293b; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
-        header h2 { font-size: 1.25rem; }
-        .logout-btn { background: #ef4444; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
-
-        /* AUTH MODAL */
-        #auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1e293b; z-index: 999; display: flex; justify-content: center; align-items: center; }
-        .auth-box { background: white; padding: 2rem; border-radius: 12px; width: 350px; text-align: center; }
-        .auth-box input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; }
-        .auth-box button { width: 100%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; }
-
-        /* CONTAINER */
-        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
-
-        /* STATS GRID */
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
-        .stat-card { background: var(--card); padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .stat-val { font-size: 2rem; font-weight: 700; color: var(--primary); }
-        .stat-label { color: #6b7280; font-size: 0.9rem; }
-
-        /* SECTIONS */
-        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-        .btn-create { background: #10b981; color: white; border: none; padding: 0.8rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        * { box-sizing: border-box; margin: 0; padding: 0; transition: all 0.2s ease; }
         
-        /* TABLE */
-        .data-table { width: 100%; background: var(--card); border-collapse: collapse; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .data-table th, .data-table td { padding: 1rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
-        .data-table th { background: #f9fafb; font-weight: 600; color: #374151; }
-        .status-dot { height: 10px; width: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; margin-right: 5px; }
-        .status-dot.online { background-color: #22c55e; }
-        .btn-small { padding: 5px 10px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.8rem; margin-right: 5px; }
-        .btn-qr { background: #3b82f6; color: white; }
-        .btn-del { background: #fee2e2; color: #ef4444; }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: var(--bg); 
+            color: var(--text-main); 
+            padding-bottom: 50px; 
+            -webkit-font-smoothing: antialiased;
+        }
 
-        /* CREATION MODAL */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
-        .modal-content { background: white; padding: 2rem; border-radius: 12px; width: 400px; }
-        .form-group { margin-bottom: 1rem; }
-        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
-
-        /* QR PRINT AREA */
-        #qr-print-area { display: none; text-align: center; background: white; padding: 20px; border-radius: 10px; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2000; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
-        .qr-info { margin-top: 10px; font-family: monospace; font-size: 1.2rem; font-weight: bold; }
+        /* --- HEADER --- */
+        header { 
+            background: #1f2937; 
+            color: white; 
+            padding: 1rem 2rem; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
         
+        header h2 { 
+            font-size: 1.25rem; 
+            font-weight: 600; 
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logout-btn { 
+            background: rgba(239, 68, 68, 0.2); 
+            color: #fca5a5; 
+            border: 1px solid rgba(239, 68, 68, 0.3); 
+            padding: 0.5rem 1rem; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: 500;
+        }
+        .logout-btn:hover { background: var(--danger); color: white; }
+
+        /* --- CONTAINER --- */
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1.5rem; }
+
+        /* --- STATS GRID --- */
+        .stats-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); 
+            gap: 1.5rem; 
+            margin-bottom: 2.5rem; 
+        }
+
+        .stat-card { 
+            background: var(--card-bg); 
+            padding: 1.5rem; 
+            border-radius: 12px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-left: 5px solid transparent;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .stat-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+
+        /* Specific accents for cards */
+        .stat-card:nth-child(1) { border-color: var(--primary); }
+        .stat-card:nth-child(2) { border-color: #8b5cf6; } /* Violet */
+        .stat-card:nth-child(3) { border-color: var(--success); }
+        .stat-card:nth-child(4) { border-color: var(--warning); }
+
+        .stat-val { font-size: 2.25rem; font-weight: 700; color: var(--text-main); line-height: 1.2; }
+        .stat-label { color: var(--text-muted); font-size: 0.875rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 5px;}
+
+        /* --- SECTIONS --- */
+        .section-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 1.5rem; 
+            background: white;
+            padding: 1rem;
+            border-radius: 12px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        
+        .section-header h3 { font-weight: 700; color: var(--text-main); }
+
+        .btn-create { 
+            background: var(--primary); 
+            color: white; 
+            border: none; 
+            padding: 0.75rem 1.5rem; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: 600; 
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 6px rgba(79, 70, 229, 0.2);
+        }
+        .btn-create:hover { background: var(--primary-hover); transform: translateY(-1px); }
+        
+        /* --- TABLE --- */
+        .table-container {
+            background: var(--card-bg); 
+            border-radius: 12px; 
+            overflow: hidden; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .data-table { width: 100%; border-collapse: collapse; }
+        
+        .data-table th { 
+            background: #f9fafb; 
+            padding: 1rem 1.5rem; 
+            text-align: left; 
+            font-size: 0.75rem; 
+            text-transform: uppercase; 
+            letter-spacing: 0.05em; 
+            color: var(--text-muted); 
+            font-weight: 600;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .data-table td { 
+            padding: 1rem 1.5rem; 
+            border-bottom: 1px solid #f3f4f6; 
+            color: var(--text-main);
+            vertical-align: middle;
+        }
+
+        .data-table tr:last-child td { border-bottom: none; }
+        .data-table tr:hover { background-color: #f9fafb; }
+
+        /* Status Badge */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .badge.online { background-color: #d1fae5; color: #065f46; }
+        .badge.offline { background-color: #fee2e2; color: #991b1b; }
+        .badge-dot { height: 6px; width: 6px; border-radius: 50%; margin-right: 6px; }
+        .badge.online .badge-dot { background-color: #10b981; }
+        .badge.offline .badge-dot { background-color: #ef4444; }
+
+        /* Action Buttons */
+        .btn-small { 
+            padding: 6px 12px; 
+            border-radius: 6px; 
+            border: none; 
+            cursor: pointer; 
+            font-size: 0.8rem; 
+            margin-right: 5px; 
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .btn-qr { background: #eff6ff; color: #1d4ed8; }
+        .btn-qr:hover { background: #dbeafe; }
+        
+        .btn-del { background: #fef2f2; color: #dc2626; }
+        .btn-del:hover { background: #fee2e2; }
+
+        /* --- AUTH OVERLAY & MODALS --- */
+        #auth-overlay, .modal { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(17, 24, 39, 0.7); /* Darker, blur */
+            backdrop-filter: blur(4px);
+            z-index: 999; 
+            display: flex; justify-content: center; align-items: center; 
+            animation: fadeIn 0.3s ease;
+        }
+
+        .auth-box, .modal-content { 
+            background: white; 
+            padding: 2.5rem; 
+            border-radius: 16px; 
+            width: 100%; 
+            max-width: 420px; 
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            animation: slideUp 0.3s ease;
+        }
+
+        .auth-box h3, .modal-content h3 { margin-bottom: 1rem; font-size: 1.5rem; color: #111827; }
+
+        .form-group { margin-bottom: 1.25rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.9rem; color: #374151; }
+        
+        input, select { 
+            width: 100%; padding: 0.75rem 1rem; 
+            border: 1px solid #d1d5db; 
+            border-radius: 8px; 
+            font-size: 0.95rem; 
+            outline: none;
+        }
+        input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+
+        .auth-box button { 
+            width: 100%; padding: 0.85rem; 
+            background: var(--primary); 
+            color: white; border: none; 
+            border-radius: 8px; 
+            font-weight: 600; 
+            cursor: pointer; margin-top: 1rem; 
+        }
+
+        /* --- QR PRINT AREA --- */
+        #qr-print-area { display: none; text-align: center; background: white; padding: 2rem; border-radius: 16px; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2000; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+        .qr-info { margin-top: 1.5rem; font-family: 'Courier New', monospace; font-size: 1.1rem; font-weight: 700; color: #374151; background: #f3f4f6; padding: 10px; border-radius: 8px; }
+
         @media print {
             body * { visibility: hidden; }
             #qr-print-area, #qr-print-area * { visibility: visible; }
             #qr-print-area { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-shadow: none; transform: none; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     </style>
 </head>
 <body>
 
     <div id="auth-overlay">
         <div class="auth-box">
-            <h3>Admin Access</h3>
-            <p style="color:#666; margin-bottom:15px; font-size:0.9rem;">Enter Factory Secret Key</p>
-            <input type="password" id="admin-secret" placeholder="Secret Key">
+            <div style="text-align: center; margin-bottom: 20px; font-size: 3rem; color: var(--primary);">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <h3 style="text-align: center;">Admin Access</h3>
+            <p style="text-align:center; color:#6b7280; margin-bottom:20px;">Enter Factory Secret Key</p>
+            <input type="password" id="admin-secret" placeholder="••••••••">
             <button onclick="adminLogin()">Enter Dashboard</button>
         </div>
     </div>
 
     <header>
-        <h2>🏭 Smart Home Factory Admin</h2>
-        <button class="logout-btn" onclick="logout()">Logout</button>
+        <h2><i class="fa-solid fa-industry" style="color: #818cf8;"></i> Smart Home Factory</h2>
+        <button class="logout-btn" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
     </header>
 
     <div class="container">
         
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-val" id="val-devices">0</div>
-                <div class="stat-label">Total Devices</div>
+                <div class="stat-val" id="val-devices">--</div>
+                <div class="stat-label"><i class="fa-solid fa-microchip"></i> Total Devices</div>
             </div>
             <div class="stat-card">
-                <div class="stat-val" id="val-users">0</div>
-                <div class="stat-label">Registered Users</div>
+                <div class="stat-val" id="val-users">--</div>
+                <div class="stat-label"><i class="fa-solid fa-users"></i> Registered Users</div>
             </div>
             <div class="stat-card">
-                <div class="stat-val" id="val-online" style="color:#22c55e">0</div>
-                <div class="stat-label">Online Now</div>
+                <div class="stat-val" id="val-online" style="color:var(--success)">--</div>
+                <div class="stat-label"><i class="fa-solid fa-wifi"></i> Online Now</div>
             </div>
             <div class="stat-card">
-                <div class="stat-val" id="val-unsold" style="color:#f59e0b">0</div>
-                <div class="stat-label">Unsold Inventory</div>
+                <div class="stat-val" id="val-unsold" style="color:var(--warning)">--</div>
+                <div class="stat-label"><i class="fa-solid fa-box-open"></i> Unsold Inventory</div>
             </div>
         </div>
 
         <div class="section-header">
-            <h3>Device Inventory</h3>
-            <button class="btn-create" onclick="openCreateModal()">+ Manufacture New Device</button>
+            <h3><i class="fa-solid fa-list-check" style="margin-right: 10px; color: var(--primary);"></i>Device Inventory</h3>
+            <button class="btn-create" onclick="openCreateModal()">
+                <i class="fa-solid fa-plus"></i> Manufacture Device
+            </button>
         </div>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Status</th>
-                    <th>Device ID</th>
-                    <th>Secret Code</th>
-                    <th>Owner Email</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody id="device-table-body">
-                </tbody>
-        </table>
+
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Device ID</th>
+                        <th>Secret Code</th>
+                        <th>Owner Email</th>
+                        <th style="text-align: right;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="device-table-body">
+                    </tbody>
+            </table>
+        </div>
 
     </div>
 
-    <div id="create-modal" class="modal">
+    <div id="create-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <h3>Manufacture Device</h3>
-            <br>
+            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">Configure a new ESP32 unit for deployment.</p>
+            
             <div class="form-group">
-                <label>Device ID (MAC based recommended)</label>
+                <label>Device ID</label>
                 <input type="text" id="new-device-id" placeholder="e.g. esp32_A1B2C3...">
+                <p style="font-size: 0.75rem; color: #9ca3af; margin-top: 5px;">Use the ID printed in the ESP32 Serial Monitor.</p>
             </div>
+            
             <div class="form-group">
                 <label>Secret Code (Sticker)</label>
                 <input type="text" id="new-secret-code" value="123456">
             </div>
-            <div style="display:flex; gap:10px;">
-                <button class="btn-create" onclick="submitCreateDevice()">Create</button>
-                <button class="btn-del" style="background:#ddd; color:#333; padding: 0.8rem;" onclick="closeCreateModal()">Cancel</button>
+
+            <div class="form-group">
+                <label>Active Channels</label>
+                <select id="new-channels">
+                    <option value="4">4 Channels (Basic)</option>
+                    <option value="8">8 Channels (Standard)</option>
+                    <option value="9" selected>9 Channels (Max)</option>
+                </select>
+            </div>
+            
+            <div style="display:flex; gap:15px; margin-top: 25px;">
+                <button class="btn-create" style="flex:1; justify-content: center;" onclick="submitCreateDevice()">Create Unit</button>
+                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;" onclick="closeCreateModal()">Cancel</button>
             </div>
         </div>
     </div>
 
-    <div id="qr-print-area">
-        <div id="qrcode"></div>
-        <div class="qr-info" id="qr-text"></div>
-        <p style="margin-top:10px; font-size:0.8rem; color:#666;">Scan to Setup</p>
-        <button onclick="window.print()" class="btn-small btn-qr" style="margin-top:15px; padding:8px 15px;">Print Sticker</button>
-        <button onclick="closeQr()" class="btn-small" style="margin-top:15px; background:#ddd; color:#333;">Close</button>
+    <div id="edit-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>Edit Configuration</h3>
+            <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Change hardware capabilities.</p>
+            
+            <input type="hidden" id="edit-device-id">
+            
+            <div class="form-group">
+                <label>Active Channels</label>
+                <select id="edit-channels" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px;">
+                    <option value="4">4 Channels (Basic)</option>
+                    <option value="8">8 Channels (Standard)</option>
+                    <option value="9">9 Channels (Max)</option>
+                </select>
+            </div>
+            
+            <div style="display:flex; gap:10px; margin-top: 20px;">
+                <button class="btn-create" style="flex:1; justify-content:center;" onclick="submitEditChannels()">Save Changes</button>
+                <button class="btn-del" style="flex:1; background:#f3f4f6; color:#333;" onclick="document.getElementById('edit-modal').style.display='none'">Cancel</button>
+            </div>
+        </div>
     </div>
 
+    <div id="pin-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="width: 500px;">
+            <h3><i class="fa-solid fa-microchip" style="color: #6366f1; margin-right: 8px;"></i> Device Pinout</h3>
+            <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Hardware connections for this configuration.</p>
+            <div style="background: #f8fafc; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;">
+                <table class="data-table" style="font-size:0.85rem;">
+                    <thead><tr><th>Ch</th><th>Relay Pin (Out)</th><th>Switch Pin (In)</th></tr></thead>
+                    <tbody id="pin-table-body">
+                        </tbody>
+                </table>
+            </div>
+            <br>
+            <button class="btn-del" style="background:#e5e7eb; color:#374151; width:100%; padding: 10px; font-weight: 600;" onclick="document.getElementById('pin-modal').style.display='none'">Close</button>
+        </div>
+    </div>
+
+    <div id="qr-print-area">
+        <div id="qrcode" style="display: flex; justify-content: center;"></div>
+        <div class="qr-info" id="qr-text"></div>
+        <p style="margin-top:15px; font-size:0.85rem; color:#6b7280; font-weight: 500;">Scan with Smart Home App to Setup</p>
+        <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+            <button onclick="window.print()" class="btn-small btn-qr" style="padding:10px 20px;"><i class="fa-solid fa-print"></i> Print Sticker</button>
+            <button onclick="closeQr()" class="btn-small" style="padding:10px 20px; background:#f3f4f6; color:#374151;">Close</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. UPDATE RENDER TABLE FUNCTION IN HTML TO MATCH NEW UI ---
+        // We override the render logic here to ensure badges and buttons look correct.
+        
+        // Note: The main logic is in admin.js, but since you asked for UI updates,
+        // make sure your admin.js 'renderTable' function produces the HTML below.
+        
+        // Specifically, in admin.js, update the `tr.innerHTML` part to:
+        /*
+        const onlineBadge = dev.isOnline 
+            ? `<span class="badge online"><span class="badge-dot"></span>Online</span>` 
+            : `<span class="badge offline"><span class="badge-dot"></span>Offline</span>`;
+
+        const ownerDisplay = dev.owner 
+            ? `<span style="font-weight:500; color:#111827;">${dev.owner.email}</span>` 
+            : `<span style="color:#f59e0b; font-weight:600; font-size: 0.85rem; background: #fef3c7; padding: 2px 8px; border-radius: 4px;">Unsold</span>`;
+
+        tr.innerHTML = `
+            <td>${onlineBadge}</td>
+            <td style="font-family:'Courier New', monospace; font-weight:600; color:#4b5563;">${dev.deviceId}</td>
+            <td style="font-family:'Courier New', monospace; letter-spacing:1px;">${dev.secretCode}</td>
+            <td>
+                ${ownerDisplay}
+                ${dev.owner ? `<div style="margin-top:4px;"><button onclick="unlinkUser('${dev.deviceId}')" style="font-size:0.7rem; color:#ef4444; border:none; background:none; cursor:pointer; text-decoration: underline;">Unlink User</button></div>` : ''}
+            </td>
+            <td style="text-align: right;">
+                <button class="btn-small" style="background:#f59e0b; color:white;" onclick="openEditModal('${dev.deviceId}', ${channelCount})" title="Edit Channels"><i class="fa-solid fa-gear"></i></button>
+                <button class="btn-small" style="background:#6366f1; color:white;" onclick="showPins(${channelCount})" title="View Pinout"><i class="fa-solid fa-microchip"></i></button>
+                <button class="btn-small btn-qr" onclick="showQr('${dev.deviceId}', '${dev.secretCode}')" title="Get QR"><i class="fa-solid fa-qrcode"></i></button>
+                <button class="btn-small btn-del" onclick="deleteDevice('${dev.deviceId}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+            </td>
+        `;
+        */
+    </script>
     <script src="admin.js"></script>
 </body>
 </html>

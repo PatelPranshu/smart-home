@@ -73,9 +73,14 @@ float lastTemp = 0;
 float lastHum = 0;
 
 // --- PINS ---
-const int NUM_RELAYS = 9;
-const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32};
-const int switchPins[NUM_RELAYS] = {15, 4, 16, 17, 5, 18, 19, 21};
+const int NUM_RELAYS = 9; 
+
+// [UPDATED] Added GPIO 12 for Relay 9
+const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32, 12}; 
+
+// [UPDATED] Added GPIO 34 for Switch 9 (Requires External Pullup!)
+const int switchPins[NUM_RELAYS] = {15, 4, 16, 17, 5, 18, 19, 21, 34}; 
+
 const int STATUS_LED = 2;
 const int TOUCH_RESET_PIN = 0; // Boot Button
 
@@ -345,8 +350,14 @@ void setup() {
   
   for(int i=0; i<NUM_RELAYS; i++) {
     pinMode(relayPins[i], OUTPUT);
-    digitalWrite(relayPins[i], HIGH); 
-    pinMode(switchPins[i], INPUT_PULLUP);
+    digitalWrite(relayPins[i], HIGH); // [UPDATED] GPIO 34-39 do not have internal pullups.
+    // If using Pin 34 (Switch 9), we use plain INPUT (Expect external 10k Resistor)
+    if (switchPins[i] >= 34) {
+      pinMode(switchPins[i], INPUT); 
+    } else {
+      pinMode(switchPins[i], INPUT_PULLUP);
+    }
+    
     lastSwitchState[i] = digitalRead(switchPins[i]);
   }
 
