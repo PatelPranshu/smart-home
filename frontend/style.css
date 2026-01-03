@@ -198,7 +198,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     
     /* CHANGED: Add padding so content isn't hidden behind the fixed nav */
     /* padding-bottom: 100px;  */
-    padding-bottom: 100px;    
+    /* padding-bottom: 100px;     */
     
     position: relative;
 }
