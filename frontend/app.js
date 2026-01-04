@@ -376,12 +376,19 @@ async function initSettings() {
 
     // --- NEW: Load Google Toggle State ---
     const toggleEl = document.getElementById('google-toggle');
+    const sectionEl = document.getElementById('google-integration-section');
     try {
         const res = await fetch(`${API_URL}/user/google-status`, {
             headers: { 'x-access-token': token }
         });
         const data = await res.json();
-        if(toggleEl) toggleEl.checked = data.enabled;
+        // Only show if linked
+        if (data.isLinked) {
+            if(sectionEl) sectionEl.style.display = 'block'; // Show it
+            if(toggleEl) toggleEl.checked = data.enabled;
+        } else {
+            if(sectionEl) sectionEl.style.display = 'none'; // Keep hidden
+        }
     } catch(err) { console.error("Failed to fetch google settings"); }
 
     // --- NEW: Handle Toggle Change ---

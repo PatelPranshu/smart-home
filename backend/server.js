@@ -392,7 +392,10 @@ app.post('/api/user-update', auth, async (req, res) => {
 app.get('/api/user/google-status', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
-        res.json({ enabled: user.googleHomeEnabled });
+        res.json({ 
+            enabled: user.googleHomeEnabled,
+            isLinked: user.isGoogleLinked 
+        });
     } catch (err) { res.status(500).json({ error: "Error" }); }
 });
 
@@ -918,6 +921,8 @@ app.post('/token', async (req, res) => {
         userId = refresh_token;
     }
 
+    await User.findByIdAndUpdate(userId, { isGoogleLinked: true });
+
     // Create a standard JWT for Google to use in future requests
     const token = jwt.sign({ id: userId }, process.env.JWT_SECRET);
 
@@ -936,6 +941,16 @@ app.post('/api/smarthome', auth, async (req, res) => {
     const userId = req.user.id; // Extracted from the JWT token
     const requestId = body.requestId;
     const intent = body.inputs[0].intent;
+
+    // Handle Disconnect ---
+    if (intent === 'action.devices.DISCONNECT') {
+        await User.findByIdAndUpdate(userId, { isGoogleLinked: false });
+        return res.json({});
+    }
+
+    // Self-Healing (If they are sending commands, they are linked)
+    await User.findByIdAndUpdate(userId, { isGoogleLinked: true });
+
 
     console.log(`Google Request: ${intent}`);
 

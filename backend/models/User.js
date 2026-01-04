@@ -10,6 +10,9 @@ const UserSchema = new mongoose.Schema({
 
   homeTitle: { type: String, default: 'My Home' },
   
+
+  isGoogleLinked: { type: Boolean, default: false },
+  
   createdAt: { type: Date, default: Date.now }
 });
 
