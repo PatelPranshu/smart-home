@@ -65,9 +65,9 @@ unsigned long lastWifiCheck = 0;
 
 // CONFIGURATION: Thresholds
 // FIX: Set to 0 to send EVERY change (needed for DHT11's low resolution)
-const float TEMP_THRESHOLD = 0.0; 
+const float TEMP_THRESHOLD = 1.0; 
 // FIX: Lower humidity threshold to 1% to see changes faster
-const float HUM_THRESHOLD = 1.0;
+const float HUM_THRESHOLD = 10.0;
 // [FIXED] Renamed 'lastDhtRead' to 'lastDhtCheck' to match loop logic
 unsigned long lastDhtCheck = 0;   
 float lastTemp = 0;
@@ -394,7 +394,7 @@ void setup() {
   
   // Attempt to connect. If saved creds exist, it tries them.
   // If connection fails (bad creds OR router off), it starts AP.
-  bool res = wm.autoConnect(apName.c_str(), "setup123"); 
+  bool res = wm.autoConnect(apName.c_str(),"SetupLocal"); 
 
   if(!res) {
       Serial.println("[WiFi] Connection/Setup Failed.");

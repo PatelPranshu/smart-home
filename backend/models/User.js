@@ -8,6 +8,8 @@ const UserSchema = new mongoose.Schema({
   // Store Google Home Toggle State
   googleHomeEnabled: { type: Boolean, default: true },
 
+  homeTitle: { type: String, default: 'My Home' },
+  
   createdAt: { type: Date, default: Date.now }
 });
 

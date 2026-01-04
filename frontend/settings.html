@@ -27,7 +27,7 @@
                     </div>
                     <div class="profile-info">
                         <span id="username-display" class="username">Loading...</span>
-                        <span class="role">Admin</span>
+                        <span class="role">User</span>
                     </div>
                 </div>
 
@@ -40,6 +40,15 @@
                     </div>
                     <i class="fa-solid fa-chevron-right"></i>
                 </button>
+                
+
+                <div class="settings-card" style="margin-top: 10px; padding: 15px;">
+                    <label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:5px; color:#555;">Dashboard Title</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="input-home-title" placeholder="My Home" class="input-field" style="margin-bottom:0;">
+                        <button onclick="saveHomeTitle()" class="btn-primary" style="width: auto; padding: 0 20px;">Save</button>
+                    </div>
+                </div>
             </div>
 
             <div class="settings-group" style="margin-top: 25px;">

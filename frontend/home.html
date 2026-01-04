@@ -15,7 +15,7 @@
         <header>
             <div>
                 <p id="date-display">Fetching date...</p>
-                <h2>My Home</h2>
+                <h2 id="dashboard-title">My Home</h2>
             </div>
             <div class="user-avatar" onclick="logout()">
                 <i class="fa-solid fa-right-from-bracket" style="color: #ef4444;"></i>
@@ -24,11 +24,11 @@
 
         <div class="content-area no-scroll">
             <div class="stats-row">
-                <div class="stat-card">
+                <div class="stat-card" onclick="openSensorModal()" style="cursor: pointer;">
                     <div class="stat-icon bg-orange"><i class="fa-solid fa-temperature-half"></i></div>
                     <div><p class="stat-label">TEMP</p><p class="stat-val" id="temp-display">--°C</p></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" onclick="openSensorModal()" style="cursor: pointer;">
                     <div class="stat-icon bg-blue"><i class="fa-solid fa-droplet"></i></div>
                     <div><p class="stat-label">HUMIDITY</p><p class="stat-val" id="hum-display">--%</p></div>
                 </div>
@@ -57,8 +57,7 @@
             </div>
         </div>
     </div>
-
-    <div id="edit-modal" class="modal-overlay hidden">
+<div id="edit-modal" class="modal-overlay hidden">
         <div class="modal-card">
             <div class="modal-header">
                 <h3>Device Settings</h3>
@@ -76,38 +75,32 @@
             <div class="modal-section" style="margin-top:15px;">
                 <label style="display:block; margin-bottom:5px; font-weight:600;">Device Type</label>
                 <div class="type-grid">
-                        <div class="type-option" onclick="selectType('light')" data-type="light">
-                            <i class="fa-solid fa-lightbulb"></i><span>Light</span>
-                        </div>
-                        
-                        <div class="type-option" onclick="selectType('fan')" data-type="fan">
-                            <i class="fa-solid fa-fan"></i><span>Fan</span>
-                        </div>
-                        
-                        <div class="type-option" onclick="selectType('ac')" data-type="ac">
-                            <i class="fa-solid fa-snowflake"></i><span>AC</span>
-                        </div>
-                        
-                        <div class="type-option" onclick="selectType('tv')" data-type="tv">
-                            <i class="fa-solid fa-tv"></i><span>TV</span>
-                        </div>
-                        
-                        <div class="type-option" onclick="selectType('wifi')" data-type="wifi">
-                            <i class="fa-solid fa-wifi"></i><span>WiFi</span>
-                        </div>
-                        
-                        <div class="type-option" onclick="selectType('socket')" data-type="socket">
-                            <i class="fa-solid fa-plug"></i><span>Socket</span>
-                        </div>
-                        
-                        <div class="type-option" onclick="selectType('water')" data-type="water">
-                            <i class="fa-solid fa-faucet-drip"></i><span>Pump</span>
-                        </div>
-                        
-                        <div class="type-option" onclick="selectType('laundry')" data-type="laundry">
-                            <i class="fa-solid fa-shirt"></i><span>Wash</span>
-                        </div>
+                    <div class="type-option" onclick="selectType('light')" data-type="light">
+                        <i class="fa-solid fa-lightbulb"></i><span>Light</span>
                     </div>
+                    <div class="type-option" onclick="selectType('fan')" data-type="fan">
+                        <i class="fa-solid fa-fan"></i><span>Fan</span>
+                    </div>
+                    <div class="type-option" onclick="selectType('ac')" data-type="ac">
+                        <i class="fa-solid fa-snowflake"></i><span>AC</span>
+                    </div>
+                    <div class="type-option" onclick="selectType('tv')" data-type="tv">
+                        <i class="fa-solid fa-tv"></i><span>TV</span>
+                    </div>
+                    <div class="type-option" onclick="selectType('wifi')" data-type="wifi">
+                        <i class="fa-solid fa-wifi"></i><span>WiFi</span>
+                    </div>
+                    <div class="type-option" onclick="selectType('socket')" data-type="socket">
+                        <i class="fa-solid fa-plug"></i><span>Socket</span>
+                    </div>
+                    <div class="type-option" onclick="selectType('water')" data-type="water">
+                        <i class="fa-solid fa-faucet-drip"></i><span>Pump</span>
+                    </div>
+                    <div class="type-option" onclick="selectType('laundry')" data-type="laundry">
+                        <i class="fa-solid fa-shirt"></i><span>Wash</span>
+                    </div>
+                </div> </div>
+
             <div class="modal-section">
                 <label>Auto Turn Off</label>
                 <div class="timer-row">
@@ -118,9 +111,20 @@
             </div>
 
             <button onclick="saveChanges()" class="btn-primary" style="margin-top: 20px;">Save Changes</button>
+        </div> </div> <div id="sensor-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Select Primary Sensor</h3>
+                <button onclick="closeSensorModal()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div id="sensor-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto;">
+                </div>
+
+            <button onclick="saveSensorSelection()" class="btn-primary" style="margin-top: 15px;">Set as Main Sensor</button>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
 </body>
 </html>

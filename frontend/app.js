@@ -156,9 +156,20 @@ function initLogin() {
 // ==========================================
 // 3. PAGE: HOME (home.html)
 // ==========================================
-function initHome() {
+async function initHome() {
     const dateOptions = { weekday: 'long', month: 'long', day: 'numeric' };
     document.getElementById('date-display').innerText = new Date().toLocaleDateString('en-US', dateOptions);
+    
+
+    // --- NEW: Fetch Custom Title ---
+    try {
+        const res = await fetch(`${API_URL}/user/profile`, { headers: { 'x-access-token': token } });
+        const data = await res.json();
+        if (data.homeTitle) {
+            document.getElementById('dashboard-title').innerText = data.homeTitle;
+        }
+    } catch (err) { console.error("Failed to load title"); }
+
 
     fetchDevices();
     setInterval(fetchDevices, 2000); 
@@ -334,6 +345,33 @@ async function initEnergy() {
 async function initSettings() {
     const userEmail = localStorage.getItem('userEmail') || "User"; 
     document.getElementById('username-display').innerText = userEmail;
+
+    // --- NEW: Load current title into input box ---
+    try {
+        const res = await fetch(`${API_URL}/user/profile`, { headers: { 'x-access-token': token } });
+        const data = await res.json();
+        if (document.getElementById('input-home-title')) {
+            document.getElementById('input-home-title').value = data.homeTitle || "";
+        }
+    } catch (err) {}
+
+    // --- NEW: Save Function ---
+    window.saveHomeTitle = async () => {
+        const newTitle = document.getElementById('input-home-title').value;
+        if(!newTitle) return showToast("Title cannot be empty", "warning");
+
+        try {
+            const res = await fetch(`${API_URL}/user-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ homeTitle: newTitle })
+            });
+
+            if(res.ok) showToast("Title Updated!", "success");
+            else showToast("Update failed", "error");
+        } catch(err) { showToast("Server Error", "error"); }
+    };
+
 
 
     // --- NEW: Load Google Toggle State ---
@@ -638,16 +676,32 @@ async function fetchDevices() {
         });
         
         const devices = await res.json();
-        // Update Temp/Humidity from the first device found (or calculate average)
+        
+        // --- NEW: Store globally for the popup to use ---
+        window.allDevices = devices; 
+
+        // --- UPDATED: Select device based on User Preference ---
         if (devices.length > 0) {
-            // Find the first device that has valid sensor data (non-zero)
-            const sensorDevice = devices.find(d => d.temperature > 0 || d.humidity > 0) || devices[0];
+            let sensorDevice = null;
+            
+            // 1. Check if user has a preferred sensor saved
+            const preferredId = localStorage.getItem('primarySensorId');
+            if (preferredId) {
+                sensorDevice = devices.find(d => d.deviceId === preferredId);
+            }
+
+            // 2. Fallback: If no preference, find first active one
+            if (!sensorDevice) {
+                sensorDevice = devices.find(d => d.temperature > 0 || d.humidity > 0) || devices[0];
+            }
+
             const tempEl = document.getElementById('temp-display');
             const humEl = document.getElementById('hum-display');
     
             if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
             if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
         }
+        
         renderGrid(devices);
     } catch (err) { console.error("Fetch error", err); }
 }
@@ -795,3 +849,59 @@ function logout() {
     localStorage.removeItem('token');
     window.location.href = 'index.html';
 }
+
+// ==========================================
+// 7. SENSOR SELECTION POPUP LOGIC
+// ==========================================
+
+window.openSensorModal = () => {
+    const modal = document.getElementById('sensor-modal');
+    const list = document.getElementById('sensor-list');
+    list.innerHTML = ''; // Clear previous list
+
+    if (!window.allDevices || window.allDevices.length === 0) {
+        list.innerHTML = '<p style="color:#666; text-align:center;">No devices found.</p>';
+        modal.classList.remove('hidden');
+        return;
+    }
+
+    const savedId = localStorage.getItem('primarySensorId');
+
+    window.allDevices.forEach(d => {
+        const item = document.createElement('label');
+        item.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9fafb; border-radius: 8px; cursor: pointer; border: 1px solid #eee;";
+        
+        const isChecked = (savedId === d.deviceId) ? 'checked' : '';
+
+        item.innerHTML = `
+            <div style="display:flex; flex-direction:column;">
+                <span style="font-weight:600; color:#333;">${d.deviceId}</span>
+                <span style="font-size:0.8rem; color:#666;">
+                    <i class="fa-solid fa-temperature-half"></i> ${d.temperature}°C &nbsp;|&nbsp; 
+                    <i class="fa-solid fa-droplet"></i> ${d.humidity}%
+                </span>
+            </div>
+            <input type="radio" name="sensor_select" value="${d.deviceId}" ${isChecked} style="width:20px; height:20px;">
+        `;
+        list.appendChild(item);
+    });
+
+    modal.classList.remove('hidden');
+};
+
+window.saveSensorSelection = () => {
+    const selected = document.querySelector('input[name="sensor_select"]:checked');
+    if (selected) {
+        localStorage.setItem('primarySensorId', selected.value);
+        showToast("Main Sensor Updated", "success");
+        closeSensorModal();
+        fetchDevices(); // Refresh home page immediately
+    } else {
+        showToast("Please select a device", "warning");
+    }
+};
+
+window.closeSensorModal = () => {
+    const modal = document.getElementById('sensor-modal');
+    if(modal) modal.classList.add('hidden');
+};

@@ -264,6 +264,8 @@ mqttClient.on('message', async (topic, message) => {
 });
 
 
+
+
 // --- MIDDLEWARE ---
 const auth = (req, res, next) => {
   // Try finding the token in the standard "Authorization" header (Google uses this)
@@ -345,14 +347,29 @@ app.post('/api/login', [
   res.json({ token, role: user.role }); 
 });
 
+
+// Get User Settings (Profile & Preferences)
+app.get('/api/user/profile', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        res.json({ 
+            email: user.email, 
+            role: user.role, 
+            homeTitle: user.homeTitle || "My Home" 
+        });
+    } catch (err) { res.status(500).json({ error: "Failed to fetch profile" }); }
+});
+
+
 // Update User Password/Email
 app.post('/api/user-update', auth, async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, homeTitle } = req.body;
   
   try {
       // Create update object
       let updates = {};
       if (email) updates.email = email;
+      if (homeTitle) updates.homeTitle = homeTitle;
       if (password) {
         updates.password = await bcrypt.hash(password, 10);
       }
@@ -366,6 +383,8 @@ app.post('/api/user-update', auth, async (req, res) => {
       res.status(500).json({ error: "Failed to update user" });
   }
 });
+
+
 
 // Google Home Toggle APIs ---
 
@@ -527,7 +546,7 @@ app.post('/api/control', auth, [
                     }
                 });
             } catch (bgErr) {
-                console.error("Background Task Error:", bgErr.message);
+                console.error("Background Task Error:", bgErr);
             }
         })();
 
