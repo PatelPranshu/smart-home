@@ -3,9 +3,15 @@ const API_URL = 'https://smart-home-04m4.onrender.com/api';
 
 // [HARDWARE] Pin Map matching Firmware (GPIOs)
 const PIN_MAP = [
-    { r: 22, s: 15 }, { r: 23, s: 4 },  { r: 14, s: 16 },
-    { r: 27, s: 17 }, { r: 26, s: 5 },  { r: 25, s: 18 },
-    { r: 33, s: 19 }, { r: 32, s: 21 }, { r: 12, s: 34 }
+    { r: 22, s: 15 }, // Relay 1 & Switch 1 (Matches Code Index 0)
+    { r: 23, s: 16 }, // Relay 2 & Switch 2 (Matches Code Index 1)
+    { r: 14, s: 17 }, // Relay 3 & Switch 3 (Matches Code Index 2)
+    { r: 27, s: 5  }, // Relay 4 & Switch 4 (Matches Code Index 3)
+    { r: 26, s: 18 }, // Relay 5 & Switch 5 (Matches Code Index 4)
+    { r: 25, s: 19 }, // Relay 6 & Switch 6 (Matches Code Index 5)
+    { r: 33, s: 21 }, // Relay 7 & Switch 7 (Matches Code Index 6)
+    { r: 32, s: 34 }, // Relay 8 & Switch 8 (Matches Code Index 7)
+    { r: 4,  s: 35 }  // Relay 9 & Switch 9 (Matches Code Index 8)
 ];
 
 // 1. Get Token
