@@ -5,6 +5,7 @@ const SwitchSchema = new mongoose.Schema({
   name: String,
   state: Boolean,
   type: { type: String, default: 'light' },
+  inverted: { type: Boolean, default: false },
   lastOnTime: { type: Date, default: null },
   timerExpiresAt: { type: Date, default: null }
 }, { _id: false });

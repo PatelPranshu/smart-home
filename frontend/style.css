@@ -252,15 +252,17 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     flex-shrink: 0;
 }
 
+/* --- Find this section in your CSS --- */
 .device-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 1rem;
     
-    flex: 1;           
-    overflow-y: auto;  
+    /* CHANGE THIS: From flex: 1 to height: auto */ 
+    height: auto; 
     
-    /* CHANGED: Increase padding to clear the floating navbar */
+    /* Keep these to allow scrolling when the list gets long */
+    overflow-y: auto;  
     padding-bottom: 160px; 
     
     -ms-overflow-style: none;

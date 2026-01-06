@@ -248,6 +248,24 @@
         /* Animations */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        /* Add this at the end of your <style> block */
+        .switch-toggle {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+        .switch-toggle input { opacity: 0; width: 0; height: 0; }
+        .switch-toggle input:checked + .slider { background-color: var(--warning); }
+        .switch-toggle input:checked + .slider:before { transform: translateX(20px); }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px;
+            background-color: white; transition: .4s; border-radius: 50%;
+        }
     </style>
 </head>
 <body>
@@ -376,7 +394,7 @@
             <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Hardware connections for this configuration.</p>
             <div style="background: #f8fafc; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;">
                 <table class="data-table" style="font-size:0.85rem;">
-                    <thead><tr><th>Ch</th><th>Relay Pin (Out)</th><th>Switch Pin (In)</th></tr></thead>
+                    <thead><tr><>Ch</ th><th>Relay Pin (Out)</th><th>Switch Pin (In)</th></tr></thead>
                     <tbody id="pin-table-body">
                         </tbody>
                 </table>
@@ -396,7 +414,32 @@
         </div>
     </div>
 
-    <script>
+    <div id="invert-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3><i class="fa-solid fa-repeat" style="color: var(--warning); margin-right: 10px;"></i> Logic Inversion</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">
+            Enable this if the relay is wired backward (Normally Closed instead of Normally Open).
+        </p>
+        
+        <div class="table-container" style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Switch</th>
+                        <th style="text-align: right;">Inverted?</th>
+                    </tr>
+                </thead>
+                <tbody id="invert-table-body">
+                    </tbody>
+            </table>
+        </div>
+        
+        <div style="margin-top: 25px;">
+            <button class="btn-del" style="width: 100%; background: #f3f4f6; color: #374151;" onclick="document.getElementById('invert-modal').style.display='none'">Close</button>
+        </div>
+    </div>
+</div>
+    <!-- <script>
         // --- 1. UPDATE RENDER TABLE FUNCTION IN HTML TO MATCH NEW UI ---
         // We override the render logic here to ensure badges and buttons look correct.
         
@@ -404,7 +447,7 @@
         // make sure your admin.js 'renderTable' function produces the HTML below.
         
         // Specifically, in admin.js, update the `tr.innerHTML` part to:
-        /*
+        /
         const onlineBadge = dev.isOnline 
             ? `<span class="badge online"><span class="badge-dot"></span>Online</span>` 
             : `<span class="badge offline"><span class="badge-dot"></span>Offline</span>`;
@@ -428,8 +471,8 @@
                 <button class="btn-small btn-del" onclick="deleteDevice('${dev.deviceId}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
             </td>
         `;
-        */
-    </script>
+        
+    </script> -->
     <script src="admin.js"></script>
 </body>
 </html>

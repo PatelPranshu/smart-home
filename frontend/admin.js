@@ -95,6 +95,9 @@ function renderTable(devices) {
             </td>
             <td style="text-align: right;">
                 <button class="btn-small" style="background:#f59e0b; color:white;" onclick="openEditModal('${dev.deviceId}', ${channelCount})" title="Edit Channels"><i class="fa-solid fa-gear"></i></button>
+                <button class="btn-small" style="background:#f59e0b; color:white;" onclick='openInvertModal(${JSON.stringify(dev)})' title="Fix Inverted Logic">
+                    <i class="fa-solid fa-repeat"></i>
+                </button>
                 <button class="btn-small" style="background:#6366f1; color:white;" onclick="showPins(${channelCount})" title="View Pinout"><i class="fa-solid fa-microchip"></i></button>
                 <button class="btn-small btn-qr" onclick="showQr('${dev.deviceId}', '${dev.secretCode}')" title="Get QR"><i class="fa-solid fa-qrcode"></i></button>
                 <button class="btn-small btn-del" onclick="deleteDevice('${dev.deviceId}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
@@ -236,6 +239,56 @@ function showQr(id, code) {
 
 function closeQr() {
     document.getElementById('qr-print-area').style.display = 'none';
+}
+
+
+// 13. LOGIC INVERSION UI FUNCTIONS
+function openInvertModal(device) {
+    const tbody = document.getElementById('invert-table-body');
+    tbody.innerHTML = '';
+
+    device.switches.forEach(sw => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>
+                <div style="font-weight:600;">${sw.name}</div>
+                <div style="font-size:0.7rem; color:#999;">ID: ${sw.id}</div>
+            </td>
+            <td style="text-align: right;">
+                <label class="switch-toggle">
+                    <input type="checkbox" ${sw.inverted ? 'checked' : ''} 
+                        onchange="toggleInversion('${device.deviceId}', ${sw.id}, this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    document.getElementById('invert-modal').style.display = 'flex';
+}
+
+async function toggleInversion(deviceId, switchId, isInverted) {
+    try {
+        const res = await fetch(`${API_URL}/admin/device/invert-logic`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-access-token': token 
+            },
+            body: JSON.stringify({ deviceId, switchId, inverted: isInverted })
+        });
+
+        if (res.ok) {
+            console.log(`Switch ${switchId} inversion set to ${isInverted}`);
+            // Refresh main table data to keep current state in memory
+            loadData(); 
+        } else {
+            alert("Failed to update inversion logic");
+        }
+    } catch (err) {
+        alert("Server Error while updating logic");
+    }
 }
 
 // 11. LOGOUT

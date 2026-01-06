@@ -90,9 +90,22 @@ app.use((req, res, next) => {
 app.use(mongoSanitize());
 
 // Database Connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB Connected'))
-  .catch(err => console.error(err));
+const dbOptions = {
+    autoIndex: true, // Maintain indexes
+    maxPoolSize: 10, // Maintain up to 10 socket connections
+    serverSelectionTimeoutMS: 5000, // Keep trying to connect for 5 seconds
+    socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
+    family: 4 // Use IPv4, skip trying IPv6
+};
+
+mongoose.connect(process.env.MONGO_URI, dbOptions)
+    .then(() => console.log('✅ MongoDB Connected (Optimized)'))
+    .catch(err => console.error('❌ MongoDB Connection Error:', err));
+
+// Handle sudden disconnections
+mongoose.connection.on('error', err => {
+    console.error('Mongoose secondary error:', err);
+});
 
 const appSmartHome = smarthome({
   jwt: process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : require('./smart-home-key.json')
@@ -120,147 +133,148 @@ mqttClient.on('connect', () => {
 
 // Handle MQTT Messages
 mqttClient.on('message', async (topic, message) => {
-  // [CRITICAL] Global try-catch to prevent server crashes on bad data
-  try {
-      const parts = topic.split('/');
-      
-      // Safety Check: Ensure topic format is correct (devices/ID/type)
-      if (parts.length < 3) return;
+    // [CRITICAL] Global try-catch to prevent server crashes on bad data
+    try {
+        const parts = topic.split('/');
+        
+        // Safety Check: Ensure topic format is correct (devices/ID/type)
+        if (parts.length < 3) return;
 
-      const deviceId = parts[1];
-      const type = parts[2]; 
+        const deviceId = parts[1];
+        const type = parts[2]; 
 
-      // -------------------------------------------------
-      // 1. User flipped physical switch -> Update DB
-      // -------------------------------------------------
-      if (type === 'update') {
-          const data = JSON.parse(message.toString()); // If this fails, catch block handles it
-          
-          let updateFields = { "switches.$.state": data.state };
+        // -------------------------------------------------
+        // 1. User flipped physical switch -> Update DB
+        // -------------------------------------------------
+        if (type === 'update') {
+            const data = JSON.parse(message.toString());
+            
+            // Use .lean() for faster lookup as we only need read-only inversion config here
+            const device = await Device.findOne({ deviceId }).populate('owner', 'isGoogleLinked').lean();
 
-          if (data.state) {
-              // If turned ON, start tracking time
-              updateFields["switches.$.lastOnTime"] = new Date();
-          } else {
-              // If turned OFF, stop tracking time and cancel any auto-off timer
-              updateFields["switches.$.lastOnTime"] = null;
-              updateFields["switches.$.timerExpiresAt"] = null;
-          }
+            if (!device) return;
 
-          // Update Device State
-          await Device.updateOne(
-            { deviceId: deviceId, "switches.id": data.switchId },
-            { $set: updateFields }
-          );
+            const sw = device.switches.find(s => s.id === data.switchId);
+            if (!sw) return;
 
-          // FETCH DEVICE (for History AND Google Report)
-          const device = await Device.findOne({ deviceId });
-          if(device) {
-              const sw = device.switches.find(s => s.id === data.switchId);
-              
-              // Log to History
-              await History.create({
-                  owner: device.owner,
-                  deviceId: deviceId,
-                  switchName: sw ? sw.name : `Switch ${data.switchId}`,
-                  action: data.state ? "Turned ON (Physical)" : "Turned OFF (Physical)",
-                  timestamp: new Date()
-              });
+            // INVERSION LOGIC: Calculate the logical state the user sees in the app
+            const userIntentState = sw.inverted ? !data.state : data.state;
 
-              // REPORT STATE TO GOOGLE
-              if (device.owner) {
-                  await appSmartHome.reportState({
-                      agentUserId: device.owner.toString(),
-                      requestId: Math.random().toString(),
-                      payload: {
-                          devices: {
-                              states: {
-                                  [`${deviceId}-${data.switchId}`]: {
-                                      on: data.state,
-                                      online: device.isOnline || true
-                                  }
-                              }
-                          }
-                      }
-                  });
-                  console.log(`Reported physical state change to Google for ${deviceId}`);
-              }
-          }
-      }
+            // Prepare single DB Update
+            let updateFields = { "switches.$.state": userIntentState };
+            if (userIntentState) {
+                updateFields["switches.$.lastOnTime"] = new Date();
+            } else {
+                updateFields["switches.$.lastOnTime"] = null;
+                updateFields["switches.$.timerExpiresAt"] = null;
+            }
 
-      // -------------------------------------------------
-      // 2. Device Rebooted -> Restore State
-      // -------------------------------------------------
-      else if (type === 'sync') {
-          console.log(`Device ${deviceId} rebooted. Restoring state...`);
-          const device = await Device.findOne({ deviceId });
-          if (device) {
-            device.switches.forEach(sw => {
-              const payload = JSON.stringify({ switchId: sw.id, state: sw.state });
-              mqttClient.publish(`devices/${deviceId}/command`, payload);
-            });
-          }
-      }
+            // Update Database State immediately
+            await Device.updateOne(
+                { deviceId: deviceId, "switches.id": data.switchId },
+                { $set: updateFields }
+            );
 
-      // -------------------------------------------------
-      // 3. Device Status Change (Online/Offline)
-      // -------------------------------------------------
-      else if (type === 'status') {
-          const status = message.toString().trim();
-          const isOnline = status === 'online';
-          
-          // Check current status in DB
-          const device = await Device.findOne({ deviceId });
+            // BACKGROUND TASKS: Run History and Google reporting without 'await' 
+            // to keep the MQTT processing loop fast.
+            (async () => {
+                try {
+                    // Log to History
+                    if (!device.owner) return;      
+                    await History.create({
+                        owner: device.owner._id,
+                        deviceId: deviceId,
+                        switchName: sw.name || `Switch ${data.switchId}`,
+                        action: userIntentState ? "Turned ON (Physical)" : "Turned OFF (Physical)",
+                        timestamp: new Date()
+                    });
 
-          // Only Log & Update if the status is DIFFERENT (reduces spam)
-          if (device && device.isOnline !== isOnline) {
-              console.log(`Device ${deviceId} is now ${status}`);
-              
-              await Device.updateOne(
-                  { deviceId: deviceId },
-                  { $set: { isOnline: isOnline } }
-              );
+                    // REPORT STATE TO GOOGLE
+                    if (device.owner.isGoogleLinked === true) { 
+                        await appSmartHome.reportState({
+                            agentUserId: device.owner._id.toString(),
+                            requestId: Math.random().toString(),
+                            payload: {
+                                devices: {
+                                    states: {
+                                        [`${deviceId}-${data.switchId}`]: {
+                                            on: userIntentState,
+                                            online: device.isOnline || true
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                } catch (bgErr) {
+                    console.error(`[BG TASK ERROR] ${deviceId}:`, bgErr.message);
+                }
+            })();
+        }
 
-              if (device.owner) {
-                  // Build a payload for ALL switches on this board
-                  let statesPayload = {};
-                  device.switches.forEach(sw => {
-                      statesPayload[`${deviceId}-${sw.id}`] = {
-                          online: isOnline 
-                      };
-                  });
+        // -------------------------------------------------
+        // 2. Device Rebooted -> Restore State
+        // -------------------------------------------------
+        else if (type === 'sync') {
+            console.log(`Device ${deviceId} rebooted. Restoring state...`);
+            const device = await Device.findOne({ deviceId }).lean();
+            if (device) {
+                device.switches.forEach(sw => {
+                    // APPLY INVERSION: Send correct hardware signal based on stored user intent
+                    const hardwareSignal = sw.inverted ? !sw.state : sw.state;
+                    const payload = JSON.stringify({ switchId: sw.id, state: hardwareSignal });
+                    mqttClient.publish(`devices/${deviceId}/command`, payload);
+                });
+            }
+        }
 
-                  await appSmartHome.reportState({
-                      agentUserId: device.owner.toString(),
-                      requestId: Math.random().toString(),
-                      payload: {
-                          devices: {
-                              states: statesPayload
-                          }
-                      }
-                  });
-                  console.log(`Reported connectivity (${status}) to Google`);
-              }
-          }
-      }
+        // -------------------------------------------------
+        // 3. Device Status Change (Online/Offline)
+        // -------------------------------------------------
+        else if (type === 'status') {
+            const status = message.toString().trim();
+            const isOnline = status === 'online';
+            
+            const device = await Device.findOne({ deviceId }).lean();
 
-      // -------------------------------------------------
-      // 4. Handle Sensor Data (Temp/Hum)
-      // -------------------------------------------------
-      else if (type === 'sensor') {
-          const data = JSON.parse(message.toString());
-          // Update DB directly
-          await Device.updateOne(
-              { deviceId: deviceId },
-              { $set: { temperature: data.temp, humidity: data.hum } }
-          );
-      }
+            if (device && device.isOnline !== isOnline) {
+                console.log(`Device ${deviceId} is now ${status}`);
+                
+                await Device.updateOne(
+                    { deviceId: deviceId },
+                    { $set: { isOnline: isOnline } }
+                );
 
-  } catch (err) {
-      // [CRITICAL] This catches JSON parse errors and prevents server crash
-      console.error(`[MQTT ERROR] Failed to process message on topic ${topic}:`);
-      console.error(err.message); 
-  }
+                if (device.owner) {
+                    let statesPayload = {};
+                    device.switches.forEach(sw => {
+                        statesPayload[`${deviceId}-${sw.id}`] = { online: isOnline };
+                    });
+
+                    // Background report
+                    appSmartHome.reportState({
+                        agentUserId: device.owner.toString(),
+                        requestId: Math.random().toString(),
+                        payload: { devices: { states: statesPayload } }
+                    }).catch(e => console.error("Google Status Report Error:", e.message));
+                }
+            }
+        }
+
+        // -------------------------------------------------
+        // 4. Handle Sensor Data (Temp/Hum)
+        // -------------------------------------------------
+        else if (type === 'sensor') {
+            const data = JSON.parse(message.toString());
+            await Device.updateOne(
+                { deviceId: deviceId },
+                { $set: { temperature: data.temp, humidity: data.hum } }
+            );
+        }
+
+    } catch (err) {
+        console.error(`[MQTT ERROR] Failed to process message on topic ${topic}:`, err.message);
+    }
 });
 
 
@@ -296,6 +310,35 @@ const auth = (req, res, next) => {
   }
 };
 
+
+const verifyAdmin = async (req, res, next) => {
+    try {
+        // req.user.id comes from the previous 'auth' middleware
+        // fetch the user from DB to ensure the role is current
+        const user = await User.findById(req.user.id);
+
+        // Check if user exists and has role 'admin'
+        if (!user || user.role !== 'admin') {
+            return res.status(403).json({ error: "Access Denied: Admins Only." });
+        }
+
+        // Allowed
+        next();
+    } catch (err) {
+        res.status(500).json({ error: "Server Error Checking Admin" });
+    }
+};
+// Admin: Toggle Logic Inversion for a Switch
+app.post('/api/admin/device/invert-logic', auth, verifyAdmin, async (req, res) => {
+    const { deviceId, switchId, inverted } = req.body; // inverted is true/false
+    try {
+        await Device.updateOne(
+            { deviceId: deviceId, "switches.id": switchId },
+            { $set: { "switches.$.inverted": inverted } }
+        );
+        res.json({ status: 'updated', message: `Logic Inversion set to ${inverted}` });
+    } catch (err) { res.status(500).json({ error: "Update failed" }); }
+});
 
 // --- AUTH API ---
 
@@ -362,26 +405,26 @@ app.get('/api/user/profile', auth, async (req, res) => {
 
 
 // Update User Password/Email
-app.post('/api/user-update', auth, async (req, res) => {
-  const { email, password, homeTitle } = req.body;
-  
-  try {
-      // Create update object
-      let updates = {};
-      if (email) updates.email = email;
-      if (homeTitle) updates.homeTitle = homeTitle;
-      if (password) {
-        updates.password = await bcrypt.hash(password, 10);
-      }
+app.post('/api/user-update', auth, [
+    body('email').optional().isEmail().normalizeEmail(),
+    body('homeTitle').optional().isString().trim().escape().isLength({ max: 50 }),
+    body('password').optional().isLength({ min: 6 })
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
 
-      // Update the user who is currently logged in (req.user.id)
-      await User.findByIdAndUpdate(req.user.id, updates);
-      
-      res.json({ status: 'updated' });
-  } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed to update user" });
-  }
+    const { email, password, homeTitle } = req.body;
+    try {
+        let updates = {};
+        if (email) updates.email = email;
+        if (homeTitle) updates.homeTitle = homeTitle;
+        if (password) updates.password = await bcrypt.hash(password, 10);
+
+        await User.findByIdAndUpdate(req.user.id, updates);
+        res.json({ status: 'updated' });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update user" });
+    }
 });
 
 
@@ -412,7 +455,8 @@ app.post('/api/user/google-status', auth, async (req, res) => {
 
 // Get User's Devices
 app.get('/api/devices', auth, async (req, res) => {
-  const devices = await Device.find({ owner: req.user.id });
+  // .lean() makes this query much faster for production
+  const devices = await Device.find({ owner: req.user.id }).lean();
   res.json(devices);
 });
 
@@ -501,8 +545,13 @@ app.post('/api/control', auth, [
         if (!device) return res.status(404).json({ error: "Device not found" });
 
         // MQTT Publish
-        const payload = JSON.stringify({ switchId, state });
-        mqttClient.publish(`devices/${deviceId}/command`, payload);
+        const sw = device.switches.find(s => s.id === switchId);
+
+        // INVERSION LOGIC: If inverted, send the opposite signal to the relay
+        const hardwareSignal = sw.inverted ? !state : state;
+        const payload = JSON.stringify({ switchId, state: hardwareSignal });
+
+mqttClient.publish(`devices/${deviceId}/command`, payload);
 
         // Update Database
         let updateFields = { "switches.$.state": state };
@@ -561,13 +610,26 @@ app.post('/api/control', auth, [
 });
 
 // Edit Device (Name & Icon)
-app.post('/api/edit', auth, async (req, res) => {
-  const { deviceId, switchId, newName, newType } = req.body;
-  await Device.updateOne(
-    { deviceId: deviceId, "switches.id": switchId },
-    { $set: { "switches.$.name": newName, "switches.$.type": newType } }
-  );
-  res.json({ status: 'updated' });
+app.post('/api/edit', auth, [
+    body('deviceId').isString().trim(),
+    body('switchId').isInt(),
+    body('newName').isString().trim().escape().isLength({ max: 30 }),
+    body('newType').isString().isIn(['light', 'fan', 'ac', 'outlet', 'wifi', 'socket', 'water', 'laundry'])
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: "Invalid input" });
+
+    const { deviceId, switchId, newName, newType } = req.body;
+    try {
+        // ADDED owner: req.user.id for security
+        const result = await Device.updateOne(
+            { deviceId: deviceId, owner: req.user.id, "switches.id": switchId },
+            { $set: { "switches.$.name": newName, "switches.$.type": newType } }
+        );
+
+        if (result.matchedCount === 0) return res.status(404).json({ error: "Device not found or access denied" });
+        res.json({ status: 'updated' });
+    } catch (err) { res.status(500).json({ error: "Update failed" }); }
 });
 
 
@@ -578,77 +640,109 @@ app.post('/api/timer', auth, async (req, res) => {
   const { deviceId, switchId, minutes } = req.body;
   const timerKey = `${deviceId}-${switchId}`;
   
+  // Clear existing timer if one is already running for this switch
   if (activeTimers[timerKey]) clearTimeout(activeTimers[timerKey]);
 
-  const expiryDate = new Date(Date.now() + minutes * 60000);
-
-  // TURN ON IMMEDIATELY 
-  
-  const onPayload = JSON.stringify({ switchId, state: true });
-  mqttClient.publish(`devices/${deviceId}/command`, onPayload);
-
-  await Device.updateOne(
-    { deviceId: deviceId, "switches.id": switchId },
-    { $set: { 
-        "switches.$.state": true,
-        "switches.$.lastOnTime": new Date(),
-        "switches.$.timerExpiresAt": expiryDate 
-      } 
-    }
-  );
-
-  //LOG "TURNED ON" HISTORY
   try {
-      const device = await Device.findOne({ deviceId });
-      if(device) {
-          const sw = device.switches.find(s => s.id === switchId);
-          await History.create({
-              owner: req.user.id,
-              deviceId: deviceId,
-              switchName: sw ? sw.name : `Switch ${switchId}`,
-              action: `Turned ON (Timer ${minutes}m)`, // Log the duration too!
-              timestamp: new Date()
-          });
-      }
-  } catch(err) { console.error("Timer Start Log Error", err); }
- 
+    // 1. Fetch device to check inversion settings
+    const device = await Device.findOne({ deviceId, owner: req.user.id });
+    if (!device) return res.status(404).json({ error: "Device not found" });
+    
+    const sw = device.switches.find(s => s.id === switchId);
+    if (!sw) return res.status(404).json({ error: "Switch not found" });
 
-  activeTimers[timerKey] = setTimeout(async () => {
-    console.log(`Timer expired! Turning off ${deviceId} switch ${switchId}`);
-    
-    // Turn OFF Logic
-    const offPayload = JSON.stringify({ switchId, state: false });
-    mqttClient.publish(`devices/${deviceId}/command`, offPayload);
-    
+    const expiryDate = new Date(Date.now() + minutes * 60000);
+
+    // 2. TURN ON IMMEDIATELY (Apply Inversion Logic)
+    // If inverted, logical ON = hardware false (0)
+    const startSignal = sw.inverted ? false : true; 
+    const onPayload = JSON.stringify({ switchId, state: startSignal });
+    mqttClient.publish(`devices/${deviceId}/command`, onPayload);
+
+    // 3. Update Database with logical ON state
     await Device.updateOne(
       { deviceId: deviceId, "switches.id": switchId },
       { $set: { 
-          "switches.$.state": false,
-          "switches.$.lastOnTime": null,
-          "switches.$.timerExpiresAt": null
+          "switches.$.state": true,
+          "switches.$.lastOnTime": new Date(),
+          "switches.$.timerExpiresAt": expiryDate 
         } 
       }
     );
 
-    // Log "Turned OFF" History
-    try {
-        const device = await Device.findOne({ deviceId });
-        if(device) {
-            const sw = device.switches.find(s => s.id === switchId);
-            await History.create({
-                owner: device.owner, 
-                deviceId: deviceId,
-                switchName: sw ? sw.name : `Switch ${switchId}`,
-                action: "Turned OFF (Timer)",
-                timestamp: new Date()
+    // 4. Log "TURNED ON" History
+    await History.create({
+        owner: req.user.id,
+        deviceId: deviceId,
+        switchName: sw.name || `Switch ${switchId}`,
+        action: `Turned ON (Timer ${minutes}m)`,
+        timestamp: new Date()
+    });
+
+    // 5. Start the countdown
+    activeTimers[timerKey] = setTimeout(async () => {
+      console.log(`Timer expired! Turning off ${deviceId} switch ${switchId}`);
+      
+      // Re-fetch to get current inversion status in case it changed during the timer
+      const deviceAtExpiry = await Device.findOne({ deviceId });
+      const swAtExpiry = deviceAtExpiry ? deviceAtExpiry.switches.find(s => s.id === switchId) : null;
+      
+      // 6. Turn OFF Logic (Apply Inversion Logic)
+      // If inverted, logical OFF = hardware true (1)
+      const endSignal = (swAtExpiry && swAtExpiry.inverted) ? true : false;
+      const offPayload = JSON.stringify({ switchId, state: endSignal });
+      mqttClient.publish(`devices/${deviceId}/command`, offPayload);
+      
+      // 7. Update Database with logical OFF state
+      await Device.updateOne(
+        { deviceId: deviceId, "switches.id": switchId },
+        { $set: { 
+            "switches.$.state": false,
+            "switches.$.lastOnTime": null,
+            "switches.$.timerExpiresAt": null
+          } 
+        }
+      );
+
+      // 8. Log "Turned OFF" History
+      if (deviceAtExpiry) {
+          await History.create({
+              owner: deviceAtExpiry.owner, 
+              deviceId: deviceId,
+              switchName: swAtExpiry ? swAtExpiry.name : `Switch ${switchId}`,
+              action: "Turned OFF (Timer)",
+              timestamp: new Date()
+          });
+      }
+      if (deviceAtExpiry && deviceAtExpiry.owner) {
+        const ownerRecord = await User.findById(deviceAtExpiry.owner).lean();
+        if (ownerRecord && ownerRecord.isGoogleLinked === true) {
+            await appSmartHome.reportState({
+                agentUserId: deviceAtExpiry.owner.toString(),
+                requestId: Math.random().toString(),
+                payload: {
+                    devices: {
+                        states: {
+                            [`${deviceId}-${switchId}`]: {
+                                on: false, // Timer always turns things OFF
+                                online: true
+                            }
+                        }
+                    }
+                }
             });
         }
-    } catch(err) { console.error("Timer End Log Error", err); }
-    
-    delete activeTimers[timerKey];
-  }, minutes * 60 * 1000);
+    }
+      
+      delete activeTimers[timerKey];
+    }, minutes * 60 * 1000);
 
-  res.json({ status: 'timer_set', minutes });
+    res.json({ status: 'timer_set', minutes });
+
+  } catch (err) {
+    console.error("Timer Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
 });
 
 // Wi-Fi Config Update
@@ -721,25 +815,9 @@ app.get('/api/history', auth, async (req, res) => {
 
 
 
+
 // NEW ADMIN MIDDLEWARE (Role Based)
 
-const verifyAdmin = async (req, res, next) => {
-    try {
-        // req.user.id comes from the previous 'auth' middleware
-        // fetch the user from DB to ensure the role is current
-        const user = await User.findById(req.user.id);
-
-        // Check if user exists and has role 'admin'
-        if (!user || user.role !== 'admin') {
-            return res.status(403).json({ error: "Access Denied: Admins Only." });
-        }
-
-        // Allowed
-        next();
-    } catch (err) {
-        res.status(500).json({ error: "Server Error Checking Admin" });
-    }
-};
 // Get Dashboard Stats
 app.get('/api/admin/stats', auth, verifyAdmin, async (req, res) => {
     try {
@@ -989,7 +1067,7 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
     // SYNC: Google asks "What devices does this user have?" 
     if (intent === 'action.devices.SYNC') {
-        const devices = await Device.find({ owner: userId });
+        const devices = await Device.find({ owner: userId }).lean();
         
         const payloadDevices = [];
         devices.forEach(device => {
@@ -1030,97 +1108,97 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
     // QUERY: Google asks "Is the light on?" 
     if (intent === 'action.devices.QUERY') {
-        const requestedDevices = body.inputs[0].payload.devices;
-        const deviceStatus = {};
+    const requestedDevices = body.inputs[0].payload.devices;
+    const deviceStatus = {};
 
-        for (const d of requestedDevices) {
-            const parts = d.id.split('-'); // ["esp32_001", "0"]
-            const deviceId = parts[0];
-            const switchId = parseInt(parts[1]);
+    // Group switches by deviceId to minimize DB hits
+    const uniqueDeviceIds = [...new Set(requestedDevices.map(d => d.id.split('-')[0]))];
+    
+    // Fetch all relevant devices in one go
+    const devices = await Device.find({ deviceId: { $in: uniqueDeviceIds }, owner: userId }).lean();
+    const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
 
-            const dbDevice = await Device.findOne({ deviceId, owner: userId });
-            
-            if (dbDevice) {
-                const sw = dbDevice.switches.find(s => s.id === switchId);
-                deviceStatus[d.id] = {
-                    on: sw ? sw.state : false,
-                    online: dbDevice.isOnline
-                };
-            } else {
-                deviceStatus[d.id] = { online: false };
-            }
+    for (const d of requestedDevices) {
+        const [deviceId, switchIdStr] = d.id.split('-');
+        const switchId = parseInt(switchIdStr);
+        const dbDevice = deviceMap[deviceId];
+
+        if (dbDevice) {
+            const sw = dbDevice.switches.find(s => s.id === switchId);
+            deviceStatus[d.id] = {
+                on: sw ? sw.state : false,
+                online: dbDevice.isOnline
+            };
+        } else {
+            deviceStatus[d.id] = { online: false };
         }
-
-        return res.json({
-            requestId: requestId,
-            payload: { devices: deviceStatus }
-        });
     }
+
+    return res.json({
+        requestId: requestId,
+        payload: { devices: deviceStatus }
+    });
+}
 
     // EXECUTE: Google says "Turn on the light"
-    if (intent === 'action.devices.EXECUTE') {
-        const commands = body.inputs[0].payload.commands;
-        const results = [];
+if (intent === 'action.devices.EXECUTE') {
+    const commands = body.inputs[0].payload.commands;
+    
+    // 1. Identify all unique device IDs involved in this request
+    const allDeviceIds = commands.flatMap(c => c.devices.map(d => d.id.split('-')[0]));
+    const uniqueIds = [...new Set(allDeviceIds)];
 
-        for (const command of commands) {
-            for (const device of command.devices) {
-                for (const execution of command.execution) {
-                    if (execution.command === 'action.devices.commands.OnOff') {
-                        const parts = device.id.split('-');
-                        const deviceId = parts[0];
-                        const switchId = parseInt(parts[1]);
-                        const newState = execution.params.on;
+    // 2. Fetch all devices once and create a map
+    const devices = await Device.find({ deviceId: { $in: uniqueIds }, owner: userId }).lean();
+    const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
 
-                        // Send Command to ESP32 via MQTT
-                        const mqttPayload = JSON.stringify({ switchId, state: newState });
-                        mqttClient.publish(`devices/${deviceId}/command`, mqttPayload);
+    const commandResults = await Promise.all(commands.map(async (command) => {
+        return await Promise.all(command.devices.map(async (device) => {
+            const [deviceId, switchIdStr] = device.id.split('-');
+            const switchId = parseInt(switchIdStr);
+            const dbDevice = deviceMap[deviceId];
 
-                        // Update Database
-                        await Device.updateOne(
-                           { deviceId: deviceId, "switches.id": switchId },
-                           { $set: { "switches.$.state": newState } }
-                        );
-                        
-                        // Log History (ADDED)
-                        try {
-                            // Fetch device to get the accurate switch Name
-                            const dbDevice = await Device.findOne({ deviceId });
-                            if (dbDevice) {
-                                const sw = dbDevice.switches.find(s => s.id === switchId);
-                                await History.create({
-                                    owner: userId,
-                                    deviceId: deviceId,
-                                    switchName: sw ? sw.name : `Switch ${switchId}`,
-                                    action: newState ? "Turned ON (Google)" : "Turned OFF (Google)",
-                                    timestamp: new Date()
-                                });
-                            }
-                        } catch (err) {
-                            console.error("History Log Error:", err);
-                        }
-                        
-                        // Log History
-                        results.push({
-                            ids: [device.id],
-                            status: "SUCCESS",
-                            states: {
-                                on: newState,
-                                online: true
-                            }
-                        });
-                    }
+            if (!dbDevice) return { ids: [device.id], status: "OFFLINE" };
+
+            return await Promise.all(command.execution.map(async (execution) => {
+                if (execution.command === 'action.devices.commands.OnOff') {
+                    const newState = execution.params.on;
+                    const sw = dbDevice.switches.find(s => s.id === switchId);
+                    
+                    const hardwareSignal = (sw && sw.inverted) ? !newState : newState;
+                    mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
+
+                    await Device.updateOne(
+                        { deviceId, "switches.id": switchId },
+                        { $set: { "switches.$.state": newState } }
+                    );
+
+                    // Log History in background
+                    History.create({
+                        owner: userId,
+                        deviceId: deviceId,
+                        switchName: sw ? sw.name : `Switch ${switchId}`,
+                        action: newState ? "Turned ON (Google)" : "Turned OFF (Google)"
+                    }).catch(e => console.error("History Error", e));
+
+                    return {
+                        ids: [device.id],
+                        status: "SUCCESS",
+                        states: { on: newState, online: true }
+                    };
                 }
-            }
-        }
+            }));
+        }));
+    }));
 
-        return res.json({
-            requestId: requestId,
-            payload: { commands: results }
-        });
-    }
+    return res.json({
+        requestId: requestId,
+        payload: { commands: commandResults.flat(2) }
+    });
+}
 });
 
-
+// Start Server
 app.listen(PORT, '0.0.0.0', () => { 
     console.log(`🚀 Backend server running at http://localhost:${PORT}`);
 });

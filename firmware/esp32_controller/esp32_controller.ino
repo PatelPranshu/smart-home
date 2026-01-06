@@ -78,13 +78,13 @@ float lastTemp = 0;
 float lastHum = 0;
 
 // --- PINS ---
-const int NUM_RELAYS = 9; 
+const int NUM_RELAYS = 8; 
 
 // [FIXED] Relay 9 is now on GPIO 4 (Safe Pin)
-const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32, 4}; 
+const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32}; 
 
 // [FIXED] Switch 9 is now on GPIO 35 (Input Only - Needs Resistor)
-const int switchPins[NUM_RELAYS] = {15, 16, 17, 5, 18, 19, 21, 34, 35}; 
+const int switchPins[NUM_RELAYS] = {15, 16, 17, 5, 18, 19, 21, 4}; 
 
 // Flags for saving state safely
 volatile bool saveNeeded[NUM_RELAYS] = {false};
