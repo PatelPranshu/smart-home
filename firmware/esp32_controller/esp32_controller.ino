@@ -78,13 +78,13 @@ float lastTemp = 0;
 float lastHum = 0;
 
 // --- PINS ---
-const int NUM_RELAYS = 8; 
+const int NUM_RELAYS = 9; 
 
 // [FIXED] Relay 9 is now on GPIO 4 (Safe Pin)
-const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32}; 
+const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32, 4}; 
 
 // [FIXED] Switch 9 is now on GPIO 35 (Input Only - Needs Resistor)
-const int switchPins[NUM_RELAYS] = {15, 16, 17, 5, 18, 19, 21, 4}; 
+const int switchPins[NUM_RELAYS] = {15, 16, 17, 5, 18, 19, 21, 34, 35}; 
 
 // Flags for saving state safely
 volatile bool saveNeeded[NUM_RELAYS] = {false};
@@ -285,6 +285,9 @@ void handleLedStatus() {
 void performOTA(String url) {
     Serial.println("[OTA] Starting Update from: " + url);
     
+    // 1. Unsubscribe the loop from WDT so it doesn't reboot during download
+    esp_task_wdt_delete(NULL);
+    
     // Stop operations
     client.disconnect(); 
     
@@ -293,6 +296,9 @@ void performOTA(String url) {
     otaClient.setInsecure(); // Or use setInsecure() if file server cert varies
     
     t_httpUpdate_return ret = httpUpdate.update(otaClient, url);
+
+    // 2. If it fails and doesn't restart, add WDT back
+    esp_task_wdt_add(NULL);
 
     switch (ret) {
       case HTTP_UPDATE_FAILED:
@@ -501,13 +507,18 @@ void setup() {
   }
 
   // START WATCHDOG HERE (Final Step) 
-  esp_task_wdt_config_t twdt_config = {
-      .timeout_ms = WDT_TIMEOUT * 1000,
-      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
-      .trigger_panic = true
-  };
-  esp_task_wdt_init(&twdt_config);
-  esp_task_wdt_add(NULL); 
+  // Correct way to reconfigure and add the current loop to WDT
+  esp_task_wdt_config_t config;
+  config.timeout_ms = WDT_TIMEOUT * 1000;
+  config.trigger_panic = true;
+  config.idle_core_mask = (1 << portNUM_PROCESSORS) - 1;
+
+  // Initialize or Reconfigure
+  esp_err_t err = esp_task_wdt_reconfigure(&config);
+  if (err != ESP_OK) {
+      esp_task_wdt_init(&config); // Init if not already done
+  }
+  esp_task_wdt_add(NULL); // Add the main loop task to the watchdog
 }
 
 // --- MQTT HANDLING WITH BACKOFF ---

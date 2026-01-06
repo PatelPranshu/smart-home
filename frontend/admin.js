@@ -237,53 +237,132 @@ function showQr(dev) {
     if (!qrArea || !qrDiv || !hardwareTable) return;
 
     qrDiv.innerHTML = ""; 
-    qrText.innerHTML = `Device ID: ${dev.deviceId}<br>Secret Code: ${dev.secretCode}`;
+    // 1. First show Device ID and Secret Code 
+    qrText.innerHTML = `
+        <div style="font-size: 1.4rem; font-weight: bold; margin-bottom: 5px;">Device ID: ${dev.deviceId}</div>
+        <div style="font-size: 1.2rem; color: #374151;">Secret Code: ${dev.secretCode}</div>
+    `;
     
-    // 1. Generate QR Code
     const payload = JSON.stringify({ id: dev.deviceId, code: dev.secretCode });
-    new QRCode(qrDiv, {
-        text: payload,
-        width: 150,
-        height: 150
-    });
+    new QRCode(qrDiv, { text: payload, width: 120, height: 120 });
 
-    // 2. Build Hardware Table
-    // Safety check: if switches doesn't exist yet, default to 9
     const switches = dev.switches || [];
     const channelCount = switches.length > 0 ? switches.length : 9;
 
-    let tableHtml = `
-        <table style="width:100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; text-align: left; font-family: sans-serif;">
-            <thead>
-                <tr style="background: #f3f4f6;">
-                    <th style="border: 1px solid #ddd; padding: 4px;">Ch</th>
-                    <th style="border: 1px solid #ddd; padding: 4px;">Relay</th>
-                    <th style="border: 1px solid #ddd; padding: 4px;">Switch</th>
-                    <th style="border: 1px solid #ddd; padding: 4px;">Logic</th>
+    // Build the restructured content
+    let htmlContent = `
+        <div style="text-align: left; font-family: sans-serif; margin-top: 20px;">
+            
+            <div style="background: #f3f4f6; padding: 8px; border-radius: 6px; margin-bottom: 15px; font-weight: 600;">
+                Hardware Profile: ${channelCount} Relays / ${channelCount} Switches 
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <strong>Active Sensors:</strong> 1 (DHT11 Temperature & Humidity) [cite: 9, 10]
+            </div>
+
+            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">4. Power Supply (ESP32)</h4>
+            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
+                <tr style="background:#eee;">
+                    <th style="border: 1px solid #000; padding: 4px;">Device</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Positive (+) Pin</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Negative (-) Pin</th>
                 </tr>
-            </thead>
-            <tbody>`;
+                <tr>
+                    <td style="border: 1px solid #000; padding: 4px;">ESP32 NodeMCU</td>
+                    <td style="border: 1px solid #000; padding: 4px;">VIN / 5V </td>
+                    <td style="border: 1px solid #000; padding: 4px;">GND </td>
+                </tr>
+            </table>
+
+            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">5. Sensor Pin Connections</h4>
+            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
+                <tr style="background:#eee;">
+                    <th style="border: 1px solid #000; padding: 4px;">Sensor Name</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Total Pins</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Sensor Pin</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Connect to ESP32</th>
+                </tr>
+                <tr>
+                    <td rowspan="3" style="border: 1px solid #000; padding: 4px;">DHT11 </td>
+                    <td rowspan="3" style="border: 1px solid #000; padding: 4px; text-align:center;">3 / 4</td>
+                    <td style="border: 1px solid #000; padding: 4px;">VCC</td>
+                    <td style="border: 1px solid #000; padding: 4px;">3.3V</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 4px;">DATA</td>
+                    <td style="border: 1px solid #000; padding: 4px;">GPIO 13 </td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 4px;">GND</td>
+                    <td style="border: 1px solid #000; padding: 4px;">GND </td>
+                </tr>
+            </table>
+
+            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">6. External Resistor Requirements</h4>
+            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
+                <tr style="background:#eee;">
+                    <th style="border: 1px solid #000; padding: 4px;">Resistor Value</th>
+                    <th style="border: 1px solid #000; padding: 4px;">ESP32 Pin 1</th>
+                    <th style="border: 1px solid #000; padding: 4px;">ESP32 Pin 2 (Pull-Up)</th>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 4px;">10K Ohm [cite: 13]</td>
+                    <td style="border: 1px solid #000; padding: 4px;">GPIO 34 </td>
+                    <td style="border: 1px solid #000; padding: 4px;">3.3V Pin</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; padding: 4px;">10K Ohm [cite: 13]</td>
+                    <td style="border: 1px solid #000; padding: 4px;">GPIO 35 [cite: 13]</td>
+                    <td style="border: 1px solid #000; padding: 4px;">3.3V Pin</td>
+                </tr>
+            </table>
+
+            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">7. Relay Module Connections</h4>
+            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
+                <tr style="background:#eee;">
+                    <th style="border: 1px solid #000; padding: 4px;">Channel</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Relay VCC</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Relay GND</th>
+                    <th style="border: 1px solid #000; padding: 4px;">IN Pin to ESP32</th>
+                </tr>`;
 
     for(let i = 0; i < channelCount; i++) {
-        const pin = PIN_MAP[i];
-        if (!pin) continue; // Skip if index exceeds PIN_MAP
-
-        // Check inversion status safely
-        const swConfig = switches[i] || {};
-        const isInverted = swConfig.inverted ? "Inversed" : "Normal";
-        
-        tableHtml += `
+        htmlContent += `
             <tr>
-                <td style="border: 1px solid #ddd; padding: 4px;"><b>${i+1}</b></td>
-                <td style="border: 1px solid #ddd; padding: 4px;">GPIO ${pin.r}</td>
-                <td style="border: 1px solid #ddd; padding: 4px;">GPIO ${pin.s}</td>
-                <td style="border: 1px solid #ddd; padding: 4px;">${isInverted}</td>
+                <td style="border: 1px solid #000; padding: 4px; font-weight:bold;">Relay ${i+1}</td>
+                <td style="border: 1px solid #000; padding: 4px;">5V</td>
+                <td style="border: 1px solid #000; padding: 4px;">GND</td>
+                <td style="border: 1px solid #000; padding: 4px;">GPIO ${PIN_MAP[i].r} </td>
             </tr>`;
     }
 
-    tableHtml += `</tbody></table>`;
-    hardwareTable.innerHTML = tableHtml;
+    htmlContent += `
+            </table>
 
+            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">8. Switch (Manual) Connections</h4>
+            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
+                <tr style="background:#eee;">
+                    <th style="border: 1px solid #000; padding: 4px;">Channel</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Switch Pin 1</th>
+                    <th style="border: 1px solid #000; padding: 4px;">Switch Pin 2</th>
+                </tr>`;
+
+    for(let i = 0; i < channelCount; i++) {
+        htmlContent += `
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px; font-weight:bold;">Switch ${i+1}</td>
+                <td style="border: 1px solid #000; padding: 4px;">GPIO ${PIN_MAP[i].s} </td>
+                <td style="border: 1px solid #000; padding: 4px;">GND</td>
+            </tr>`;
+    }
+
+    htmlContent += `
+            </table>
+            <p style="font-size: 9px; font-style: italic;">* Note: GPIO 34 & 35 do not have internal pull-ups. Resistor must bridge GPIO to 3.3V. [cite: 13]</p>
+        </div>`;
+
+    hardwareTable.innerHTML = htmlContent;
     qrArea.style.display = 'block';
 }
 

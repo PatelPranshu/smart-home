@@ -1202,9 +1202,18 @@ if (intent === 'action.devices.EXECUTE') {
                     const hardwareSignal = (sw && sw.inverted) ? !newState : newState;
                     mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
 
+                    // Prepare update fields to include timestamp
+                    let updateFields = { "switches.$.state": newState };
+                    if (newState) {
+                        updateFields["switches.$.lastOnTime"] = new Date();
+                    } else {
+                        updateFields["switches.$.lastOnTime"] = null;
+                        updateFields["switches.$.timerExpiresAt"] = null;
+                    }
+
                     await Device.updateOne(
                         { deviceId, "switches.id": switchId },
-                        { $set: { "switches.$.state": newState } }
+                        { $set: updateFields } // Now updates both state and timestamp
                     );
 
                     // Log History in background
