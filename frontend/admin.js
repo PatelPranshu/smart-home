@@ -99,7 +99,9 @@ function renderTable(devices) {
                     <i class="fa-solid fa-repeat"></i>
                 </button>
                 <button class="btn-small" style="background:#6366f1; color:white;" onclick="showPins(${channelCount})" title="View Pinout"><i class="fa-solid fa-microchip"></i></button>
-                <button class="btn-small btn-qr" onclick="showQr('${dev.deviceId}', '${dev.secretCode}')" title="Get QR"><i class="fa-solid fa-qrcode"></i></button>
+                <button class="btn-small btn-qr" onclick='showQr(${JSON.stringify(dev)})' title="Get QR">
+                    <i class="fa-solid fa-qrcode"></i>
+                </button>
                 <button class="btn-small btn-del" onclick="deleteDevice('${dev.deviceId}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
             </td>
         `;
@@ -138,7 +140,12 @@ async function submitCreateDevice() {
         if(res.ok) {
             closeCreateModal();
             loadData(); 
-            showQr(deviceId, secretCode); 
+            const tempDev = { 
+                deviceId, 
+                secretCode, 
+                switches: new Array(parseInt(channels)).fill({ inverted: false }) 
+            };
+            showQr(tempDev); 
         } else {
             alert(data.error);
         }
@@ -218,21 +225,64 @@ function showPins(count) {
 }
 
 // 10. QR CODE LOGIC
-function showQr(id, code) {
+// --- UPDATED renderTable line (Update only this button line) ---
+// Change the showQr call to: onclick='showQr(${JSON.stringify(dev)})'
+
+function showQr(dev) {
     const qrArea = document.getElementById('qr-print-area');
     const qrDiv = document.getElementById('qrcode');
     const qrText = document.getElementById('qr-text');
+    const hardwareTable = document.getElementById('qr-hardware-table');
+
+    if (!qrArea || !qrDiv || !hardwareTable) return;
 
     qrDiv.innerHTML = ""; 
-    qrText.innerHTML = `ID: ${id}<br>Code: ${code}`;
+    qrText.innerHTML = `Device ID: ${dev.deviceId}<br>Secret Code: ${dev.secretCode}`;
     
-    const payload = JSON.stringify({ id: id, code: code });
-
+    // 1. Generate QR Code
+    const payload = JSON.stringify({ id: dev.deviceId, code: dev.secretCode });
     new QRCode(qrDiv, {
         text: payload,
         width: 150,
         height: 150
     });
+
+    // 2. Build Hardware Table
+    // Safety check: if switches doesn't exist yet, default to 9
+    const switches = dev.switches || [];
+    const channelCount = switches.length > 0 ? switches.length : 9;
+
+    let tableHtml = `
+        <table style="width:100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; text-align: left; font-family: sans-serif;">
+            <thead>
+                <tr style="background: #f3f4f6;">
+                    <th style="border: 1px solid #ddd; padding: 4px;">Ch</th>
+                    <th style="border: 1px solid #ddd; padding: 4px;">Relay</th>
+                    <th style="border: 1px solid #ddd; padding: 4px;">Switch</th>
+                    <th style="border: 1px solid #ddd; padding: 4px;">Logic</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    for(let i = 0; i < channelCount; i++) {
+        const pin = PIN_MAP[i];
+        if (!pin) continue; // Skip if index exceeds PIN_MAP
+
+        // Check inversion status safely
+        const swConfig = switches[i] || {};
+        const isInverted = swConfig.inverted ? "Inversed" : "Normal";
+        
+        tableHtml += `
+            <tr>
+                <td style="border: 1px solid #ddd; padding: 4px;"><b>${i+1}</b></td>
+                <td style="border: 1px solid #ddd; padding: 4px;">GPIO ${pin.r}</td>
+                <td style="border: 1px solid #ddd; padding: 4px;">GPIO ${pin.s}</td>
+                <td style="border: 1px solid #ddd; padding: 4px;">${isInverted}</td>
+            </tr>`;
+    }
+
+    tableHtml += `</tbody></table>`;
+    hardwareTable.innerHTML = tableHtml;
 
     qrArea.style.display = 'block';
 }

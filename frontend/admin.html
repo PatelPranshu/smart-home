@@ -244,6 +244,15 @@
             #qr-print-area, #qr-print-area * { visibility: visible; }
             #qr-print-area { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-shadow: none; transform: none; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         }
+            @media print {
+            .no-print { display: none !important; }
+            #qr-print-area { 
+                position: absolute; 
+                top: 0; left: 0; width: 100%; 
+                padding: 0; margin: 0;
+                box-shadow: none;
+            }
+        }
 
         /* Animations */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -405,14 +414,26 @@
     </div>
 
     <div id="qr-print-area">
+        <h2 style="margin-bottom: 10px; font-size: 1.2rem;">Hardware Configuration Card</h2>
         <div id="qrcode" style="display: flex; justify-content: center;"></div>
-        <div class="qr-info" id="qr-text"></div>
-        <p style="margin-top:15px; font-size:0.85rem; color:#6b7280; font-weight: 500;">Scan with Smart Home App to Setup</p>
-        <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
-            <button onclick="window.print()" class="btn-small btn-qr" style="padding:10px 20px;"><i class="fa-solid fa-print"></i> Print Sticker</button>
-            <button onclick="closeQr()" class="btn-small" style="padding:10px 20px; background:#f3f4f6; color:#374151;">Close</button>
+        <div class="qr-info" id="qr-text" style="margin: 10px 0;"></div>
+        
+        <div id="qr-hardware-table"></div>
+
+        <p style="margin-top:15px; font-size:0.75rem; color:#6b7280;">
+            Configuration for Smart Home App Setup
+        </p>
+
+        <div class="no-print" style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+            <button onclick="window.print()" class="btn-small btn-qr" style="padding:10px 20px;">
+                <i class="fa-solid fa-print"></i> Print Sticker
+            </button>
+            <button onclick="closeQr()" class="btn-small" style="padding:10px 20px; background:#f3f4f6; color:#374151;">
+                Close
+            </button>
         </div>
     </div>
+
 
     <div id="invert-modal" class="modal" style="display: none;">
     <div class="modal-content" style="max-width: 500px;">
@@ -439,40 +460,7 @@
         </div>
     </div>
 </div>
-    <!-- <script>
-        // --- 1. UPDATE RENDER TABLE FUNCTION IN HTML TO MATCH NEW UI ---
-        // We override the render logic here to ensure badges and buttons look correct.
-        
-        // Note: The main logic is in admin.js, but since you asked for UI updates,
-        // make sure your admin.js 'renderTable' function produces the HTML below.
-        
-        // Specifically, in admin.js, update the `tr.innerHTML` part to:
-        /
-        const onlineBadge = dev.isOnline 
-            ? `<span class="badge online"><span class="badge-dot"></span>Online</span>` 
-            : `<span class="badge offline"><span class="badge-dot"></span>Offline</span>`;
-
-        const ownerDisplay = dev.owner 
-            ? `<span style="font-weight:500; color:#111827;">${dev.owner.email}</span>` 
-            : `<span style="color:#f59e0b; font-weight:600; font-size: 0.85rem; background: #fef3c7; padding: 2px 8px; border-radius: 4px;">Unsold</span>`;
-
-        tr.innerHTML = `
-            <td>${onlineBadge}</td>
-            <td style="font-family:'Courier New', monospace; font-weight:600; color:#4b5563;">${dev.deviceId}</td>
-            <td style="font-family:'Courier New', monospace; letter-spacing:1px;">${dev.secretCode}</td>
-            <td>
-                ${ownerDisplay}
-                ${dev.owner ? `<div style="margin-top:4px;"><button onclick="unlinkUser('${dev.deviceId}')" style="font-size:0.7rem; color:#ef4444; border:none; background:none; cursor:pointer; text-decoration: underline;">Unlink User</button></div>` : ''}
-            </td>
-            <td style="text-align: right;">
-                <button class="btn-small" style="background:#f59e0b; color:white;" onclick="openEditModal('${dev.deviceId}', ${channelCount})" title="Edit Channels"><i class="fa-solid fa-gear"></i></button>
-                <button class="btn-small" style="background:#6366f1; color:white;" onclick="showPins(${channelCount})" title="View Pinout"><i class="fa-solid fa-microchip"></i></button>
-                <button class="btn-small btn-qr" onclick="showQr('${dev.deviceId}', '${dev.secretCode}')" title="Get QR"><i class="fa-solid fa-qrcode"></i></button>
-                <button class="btn-small btn-del" onclick="deleteDevice('${dev.deviceId}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
-            </td>
-        `;
-        
-    </script> -->
+    
     <script src="admin.js"></script>
 </body>
 </html>

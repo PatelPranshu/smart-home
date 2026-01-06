@@ -190,21 +190,32 @@ mqttClient.on('message', async (topic, message) => {
                     });
 
                     // REPORT STATE TO GOOGLE
+
                     if (device.owner.isGoogleLinked === true) { 
-                        await appSmartHome.reportState({
-                            agentUserId: device.owner._id.toString(),
-                            requestId: Math.random().toString(),
-                            payload: {
-                                devices: {
-                                    states: {
-                                        [`${deviceId}-${data.switchId}`]: {
-                                            on: userIntentState,
-                                            online: device.isOnline || true
+                        try {
+                            await appSmartHome.reportState({
+                                agentUserId: device.owner._id.toString(),
+                                requestId: Math.random().toString(),
+                                payload: {
+                                    devices: {
+                                        states: {
+                                            [`${deviceId}-${data.switchId}`]: {
+                                                on: userIntentState,
+                                                online: device.isOnline || true
+                                            }
                                         }
                                     }
                                 }
+                            });
+                        } catch (error) {
+                            // If Google says 404, the user has unlinked their account.
+                            if (error.status === 404 || (error.response && error.response.status === 404)) {
+                                console.warn(`⚠️ User ${device.owner._id} unlinked from Google. Disabling auto-reporting.`);
+                                await User.findByIdAndUpdate(device.owner._id, { isGoogleLinked: false });
+                            } else {
+                                console.error("MQTT Google Report Error:", error.message);
                             }
-                        });
+                        }
                     }
                 } catch (bgErr) {
                     console.error(`[BG TASK ERROR] ${deviceId}:`, bgErr.message);
@@ -246,17 +257,22 @@ mqttClient.on('message', async (topic, message) => {
                 );
 
                 if (device.owner) {
-                    let statesPayload = {};
-                    device.switches.forEach(sw => {
-                        statesPayload[`${deviceId}-${sw.id}`] = { online: isOnline };
-                    });
+                    // Fetch user to see if they are linked before calling Google
+                    const ownerRecord = await User.findById(device.owner).lean();
+                    if (ownerRecord && ownerRecord.isGoogleLinked === true) {
+                        let statesPayload = {};
+                        device.switches.forEach(sw => {
+                            statesPayload[`${deviceId}-${sw.id}`] = { online: isOnline };
+                        });
 
-                    // Background report
-                    appSmartHome.reportState({
-                        agentUserId: device.owner.toString(),
-                        requestId: Math.random().toString(),
-                        payload: { devices: { states: statesPayload } }
-                    }).catch(e => console.error("Google Status Report Error:", e.message));
+                        appSmartHome.reportState({
+                            agentUserId: device.owner.toString(),
+                            requestId: Math.random().toString(),
+                            payload: { devices: { states: statesPayload } }
+                        }).catch(e => {
+                            // Optional: Handle 404 self-healing here too if you wish
+                        });
+                    }
                 }
             }
         }
@@ -583,20 +599,30 @@ mqttClient.publish(`devices/${deviceId}/command`, payload);
                 });
 
                 // Report to Google (The Slow Part)
-                await appSmartHome.reportState({
-                    agentUserId: req.user.id,
-                    requestId: Math.random().toString(),
-                    payload: {
-                        devices: {
-                            states: {
-                                [`${deviceId}-${switchId}`]: {
-                                    on: state,
-                                    online: true
+                try {
+                    // Only attempt if we think they are linked
+                    const user = await User.findById(req.user.id).lean();
+                    if (user && user.isGoogleLinked === true) {
+                        await appSmartHome.reportState({
+                            agentUserId: req.user.id,
+                            requestId: Math.random().toString(),
+                            payload: {
+                                devices: {
+                                    states: {
+                                        [`${deviceId}-${switchId}`]: {
+                                            on: state,
+                                            online: true
+                                        }
+                                    }
                                 }
                             }
-                        }
+                        });
                     }
-                });
+                } catch (error) {
+                    if (error.status === 404 || (error.response && error.response.status === 404)) {
+                        await User.findByIdAndUpdate(req.user.id, { isGoogleLinked: false });
+                    }
+                }
             } catch (bgErr) {
                 console.error("Background Task Error:", bgErr);
             }
@@ -717,20 +743,28 @@ app.post('/api/timer', auth, async (req, res) => {
       if (deviceAtExpiry && deviceAtExpiry.owner) {
         const ownerRecord = await User.findById(deviceAtExpiry.owner).lean();
         if (ownerRecord && ownerRecord.isGoogleLinked === true) {
-            await appSmartHome.reportState({
-                agentUserId: deviceAtExpiry.owner.toString(),
-                requestId: Math.random().toString(),
-                payload: {
-                    devices: {
-                        states: {
-                            [`${deviceId}-${switchId}`]: {
-                                on: false, // Timer always turns things OFF
-                                online: true
+            try {
+                await appSmartHome.reportState({
+                    agentUserId: deviceAtExpiry.owner.toString(),
+                    requestId: Math.random().toString(),
+                    payload: {
+                        devices: {
+                            states: {
+                                [`${deviceId}-${switchId}`]: {
+                                    on: false,
+                                    online: true
+                                }
                             }
                         }
                     }
+                });
+            } catch (error) {
+                // Self-Healing for Timers
+                if (error.status === 404 || (error.response && error.response.status === 404)) {
+                    console.warn(`⚠️ User ${deviceAtExpiry.owner} unlinked from Google during timer. Disabling reporting.`);
+                    await User.findByIdAndUpdate(deviceAtExpiry.owner, { isGoogleLinked: false });
                 }
-            });
+            }
         }
     }
       
