@@ -243,36 +243,32 @@ mqttClient.on('message', async (topic, message) => {
         // 3. Device Status Change (Online/Offline)
         // -------------------------------------------------
         else if (type === 'status') {
-            const status = message.toString().trim();
-            const isOnline = status === 'online';
+            const status = message.toString().trim().toLowerCase();
+            const isOnline = (status === 'online');
             
-            const device = await Device.findOne({ deviceId }).lean();
+            // Always update DB to ensure consistency
+            const device = await Device.findOneAndUpdate(
+                { deviceId: deviceId },
+                { $set: { isOnline: isOnline } },
+                { new: true }
+            ).lean();
 
-            if (device && device.isOnline !== isOnline) {
-                console.log(`Device ${deviceId} is now ${status}`);
-                
-                await Device.updateOne(
-                    { deviceId: deviceId },
-                    { $set: { isOnline: isOnline } }
-                );
+            if (device && device.owner) {
+                const ownerRecord = await User.findById(device.owner).lean();
+                if (ownerRecord && ownerRecord.isGoogleLinked) {
+                    let statesPayload = {};
+                    device.switches.forEach(sw => {
+                        statesPayload[`${deviceId}-${sw.id}`] = { 
+                            online: isOnline,
+                            on: isOnline ? sw.state : false // Ensure 'on' is false if offline
+                        };
+                    });
 
-                if (device.owner) {
-                    // Fetch user to see if they are linked before calling Google
-                    const ownerRecord = await User.findById(device.owner).lean();
-                    if (ownerRecord && ownerRecord.isGoogleLinked === true) {
-                        let statesPayload = {};
-                        device.switches.forEach(sw => {
-                            statesPayload[`${deviceId}-${sw.id}`] = { online: isOnline };
-                        });
-
-                        appSmartHome.reportState({
-                            agentUserId: device.owner.toString(),
-                            requestId: Math.random().toString(),
-                            payload: { devices: { states: statesPayload } }
-                        }).catch(e => {
-                            // Optional: Handle 404 self-healing here too if you wish
-                        });
-                    }
+                    appSmartHome.reportState({
+                        agentUserId: device.owner.toString(),
+                        requestId: Date.now().toString(),
+                        payload: { devices: { states: statesPayload } }
+                    }).catch(e => console.error("Status Report Error:", e.message));
                 }
             }
         }
@@ -1106,28 +1102,38 @@ app.post('/api/smarthome', auth, async (req, res) => {
         const payloadDevices = [];
         devices.forEach(device => {
             device.switches.forEach(sw => {
-                // Determine Google Device Type
-                let type = 'action.devices.types.SWITCH';
-                if (sw.type === 'light') type = 'action.devices.types.LIGHT';
-                if (sw.type === 'fan') type = 'action.devices.types.FAN';
-                if (sw.type === 'ac') type = 'action.devices.types.AC_UNIT';
-                if (sw.type === 'outlet') type = 'action.devices.types.OUTLET';
+                // Determine Google Device Type and Traits
+                    let type = 'action.devices.types.SWITCH';
+                    let traits = ['action.devices.traits.OnOff'];
+                    let attributes = {};
 
-                payloadDevices.push({
-                    id: `${device.deviceId}-${sw.id}`, // e.g. "esp32_001-0"
-                    type: type,
-                    traits: [
-                        'action.devices.traits.OnOff' // All your devices support On/Off
-                    ],
-                    name: {
-                        name: sw.name
-                    },
-                    willReportState: true,
-                    deviceInfo: {
-                        manufacturer: 'SmartHubPranshu',
-                        model: 'ESP32'
+                    if (sw.type === 'light') type = 'action.devices.types.LIGHT';
+                    if (sw.type === 'fan') {
+                        type = 'action.devices.types.FAN';
+                        traits.push('action.devices.traits.FanSpeed'); // Mandatory for Fans
+                        attributes = {
+                            availableFanSpeeds: {
+                                speeds: [
+                                    { speed_name: 'Low', speed_values: [{ speed_synonym: ['low', '1'], lang: 'en' }] },
+                                    { speed_name: 'High', speed_values: [{ speed_synonym: ['high', '2'], lang: 'en' }] }
+                                ],
+                                ordered: true
+                            },
+                            reversible: false
+                        };
                     }
-                });
+                    if (sw.type === 'ac') type = 'action.devices.types.AC_UNIT';
+                    if (sw.type === 'outlet') type = 'action.devices.types.OUTLET';
+
+                    payloadDevices.push({
+                        id: `${device.deviceId}-${sw.id}`,
+                        type: type,
+                        traits: traits,
+                        attributes: attributes, // Added attributes for FanSpeed
+                        name: { name: sw.name },
+                        willReportState: true,
+                        deviceInfo: { manufacturer: 'SmartHubPranshu', model: 'ESP32' }
+                    });
             });
         });
 
@@ -1227,7 +1233,10 @@ if (intent === 'action.devices.EXECUTE') {
                     return {
                         ids: [device.id],
                         status: "SUCCESS",
-                        states: { on: newState, online: true }
+                        states: { 
+                            on: newState, 
+                            online: dbDevice.isOnline // Use actual status from DB
+                        }
                     };
                 }
             }));
