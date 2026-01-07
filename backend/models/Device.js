@@ -4,6 +4,7 @@ const SwitchSchema = new mongoose.Schema({
   id: Number,
   name: String,
   state: Boolean,
+  fanSpeed: { type: String, default: 'Low' },
   type: { type: String, default: 'light' },
   inverted: { type: Boolean, default: false },
   lastOnTime: { type: Date, default: null },

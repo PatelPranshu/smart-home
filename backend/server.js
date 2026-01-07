@@ -1112,7 +1112,7 @@ app.post('/api/smarthome', auth, async (req, res) => {
                     if (sw.type === 'light') type = 'action.devices.types.LIGHT';
                     if (sw.type === 'fan') {
                         type = 'action.devices.types.FAN';
-                        traits.push('action.devices.traits.FanSpeed'); // Mandatory for Fans
+                        traits.push('action.devices.traits.FanSpeed'); // Fixes the specific error
                         attributes = {
                             availableFanSpeeds: {
                                 speeds: [
@@ -1167,10 +1167,14 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
         if (dbDevice) {
             const sw = dbDevice.switches.find(s => s.id === switchId);
-            deviceStatus[d.id] = {
+            const state = {
                 on: sw ? sw.state : false,
                 online: dbDevice.isOnline
             };
+            if (sw && sw.type === 'fan') {
+                state.currentFanSpeedSetting = sw.fanSpeed || 'Low'; // Report the speed
+            }
+            deviceStatus[d.id] = state;
         } else {
             deviceStatus[d.id] = { online: false };
         }
@@ -1240,6 +1244,24 @@ if (intent === 'action.devices.EXECUTE') {
                             on: newState, 
                             online: dbDevice.isOnline // Use actual status from the database
                         }
+                    };
+                }else if (execution.command === 'action.devices.commands.SetFanSpeed') {
+                    const newSpeed = execution.params.fanSpeed;
+                    const sw = dbDevice.switches.find(s => s.id === switchId);
+
+                    // Update database speed
+                    await Device.updateOne(
+                        { deviceId, "switches.id": switchId },
+                        { $set: { "switches.$.fanSpeed": newSpeed } }
+                    );
+
+                    // Optional: Send MQTT command to hardware
+                    // mqttClient.publish(`devices/${deviceId}/speed`, JSON.stringify({ switchId, speed: newSpeed }));
+
+                    return {
+                        ids: [device.id],
+                        status: "SUCCESS",
+                        states: { currentFanSpeedSetting: newSpeed, online: dbDevice.isOnline }
                     };
                 }
             }));
