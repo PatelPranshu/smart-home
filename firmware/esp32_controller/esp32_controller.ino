@@ -16,7 +16,7 @@
 DHT dht(DHTPIN, DHTTYPE); 
 
 // --- PRODUCTION CONFIGURATION ---
-#define WDT_TIMEOUT 30 // 30 Seconds Hardware Watchdog Timeout
+#define WDT_TIMEOUT 10 // 10 Seconds Hardware Watchdog Timeout
 
 // 1. SSL CERTIFICATE (HiveMQ Cloud)
 const char* root_ca = \

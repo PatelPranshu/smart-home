@@ -77,7 +77,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize Pages
     if (path.includes('home.html')) initHome();
-    if (path.includes('tasks.html')) initTasks();
     if (path.includes('energy.html')) initEnergy();
     if (path.includes('settings.html')) initSettings();
     if (path.includes('index.html') || path === '/') initLogin();
@@ -211,18 +210,9 @@ async function initHome() {
     };
 
     window.saveChanges = async () => {
-        const newName = document.getElementById('edit-name').value.trim();
-
-        // 1. Client-side length check
-        if (newName.length > 20) {
-            return showToast("Name is too long (Max 20 chars)", "warning");
-        }
-        if (newName.length < 2) {
-            return showToast("Name is too short", "warning");
-        }
-
+        const newName = document.getElementById('edit-name').value;
         try {
-            const res = await fetch(`${API_URL}/edit`, {
+            await fetch(`${API_URL}/edit`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
                 body: JSON.stringify({ 
@@ -232,18 +222,9 @@ async function initHome() {
                     newType: window.selectedType 
                 })
             });
-
-            if (res.ok) {
-                showToast("Device Updated", "success");
-                window.closeModal();
-                fetchDevices();
-            } else {
-                const errorData = await res.json();
-                showToast(errorData.error || "Update failed", "error");
-            }
-        } catch (err) { 
-            showToast("Failed to save changes", "error"); 
-        }
+            window.closeModal();
+            fetchDevices();
+        } catch (err) { showToast("Failed to save changes", "error"); }
     };
 
     window.setTimer = async () => {
@@ -734,23 +715,31 @@ async function fetchDevices() {
 
 function renderGrid(devices) {
     const grid = document.getElementById('device-grid');
-    if (!grid) return;
-
-    // 1. Create a set to track which cards should exist
-    const activeDomIds = new Set();
+    if(!grid) return;
 
     devices.forEach(device => {
         const isOnline = device.isOnline;
 
         device.switches.forEach(sw => {
             const domId = `card-${device.deviceId}-${sw.id}`;
-            activeDomIds.add(domId); // Mark this card as "current"
-
             let card = document.getElementById(domId);
-            const dbType = sw.type || 'light';
+            const dbType = sw.type || 'light'; 
             const iconClass = typeIcons[dbType] || 'fa-power-off';
 
-            // 2. If card doesn't exist, create it (Same as before)
+            let runtimeText = "", timerText = "";
+            if (isOnline && sw.state && sw.lastOnTime) {
+                const diffMs = new Date() - new Date(sw.lastOnTime);
+                const mins = Math.floor(diffMs / 60000);
+                const hrs = Math.floor(mins / 60);
+                runtimeText = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins} mins`;
+            }
+            if (isOnline && sw.state && sw.timerExpiresAt) {
+                const timeLeftMs = new Date(sw.timerExpiresAt) - new Date();
+                if (timeLeftMs > 0) {
+                    timerText = `${Math.ceil(timeLeftMs / 60000)}m left`;
+                }
+            }
+
             if (!card) {
                 card = document.createElement('div');
                 card.id = domId;
@@ -761,87 +750,63 @@ function renderGrid(devices) {
                         <div class="device-icon"><i class="fa-solid ${iconClass}"></i><div class="spinner"></div></div>
                     </div>
                     <div class="card-footer">
-                        <div class="footer-left"><div class="device-name"></div><div class="device-status">OFF</div></div>
+                        <div class="footer-left"><div class="device-name">${sw.name}</div><div class="device-status">OFF</div></div>
                         <div class="footer-right"><div class="runtime-display"></div><div class="timer-display"></div></div>
                     </div>`;
                 grid.appendChild(card);
             }
 
-            // 3. ALWAYS UPDATE PROPERTIES (Handles Admin changes to name/type/online status)
-            
-            // Update Name (In case admin changed it)
-            const nameEl = card.querySelector('.device-name');
-            if (nameEl && nameEl.innerText !== sw.name) {
-                nameEl.innerText = sw.name;
-            }
-
-            // Update Icon (In case type was changed from light to fan, etc.)
-            const iconEl = card.querySelector('.device-icon i');
-            if (iconEl && !card.classList.contains('card-loading')) {
-                iconEl.className = `fa-solid ${iconClass}`;
-            }
-
-            // Update Online Overlay
             const overlay = card.querySelector('.offline-overlay');
-            if (isOnline) {
+            const optionsBtn = card.querySelector('.card-options');
+            
+            if (!isOnline) {
+                card.classList.add('device-offline'); 
+                overlay.classList.remove('hidden');   
+                card.onclick = null;
+            } else {
                 card.classList.remove('device-offline');
                 overlay.classList.add('hidden');
-                // Re-attach click listener if it was lost
-                card.onclick = () => toggleDevice(device.deviceId, sw.id, !sw.state, card);
-            } else {
-                card.classList.add('device-offline');
-                overlay.classList.remove('hidden');
-                card.onclick = null;
-            }
-
-            // Update State (ON/OFF)
-            const isActive = sw.state;
-            const statusText = card.querySelector('.device-status');
-            const iconDiv = card.querySelector('.device-icon');
-            
-            if (!card.classList.contains('card-loading')) {
-                card.className = `device-card ${isOnline ? '' : 'device-offline'} ${isActive ? 'is-active' : ''}`;
-                if(iconDiv) iconDiv.className = isActive ? 'device-icon icon-on' : 'device-icon icon-off';
-                if(statusText) {
-                    statusText.innerText = isActive ? 'ON' : 'OFF';
-                    statusText.className = `device-status ${isActive ? 'text-on' : 'text-off'}`;
+                if (!card.classList.contains('card-loading')) {
+                    card.onclick = () => toggleDevice(device.deviceId, sw.id, !sw.state, card);
                 }
             }
 
-            // Update Runtime & Timers
-            updateTimersDisplay(card, sw, isOnline);
+            if(optionsBtn) {
+                optionsBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    if(isOnline && window.openModal) window.openModal(device.deviceId, sw.id, sw.name, dbType);
+                };
+            }
+
+            const nameEl = card.querySelector('.device-name');
+            if(nameEl) nameEl.innerText = sw.name;
+
+            const iconEl = card.querySelector('.device-icon i');
+            if(iconEl && !card.classList.contains('card-loading')) iconEl.className = `fa-solid ${iconClass}`;
+
+            const runtimeDiv = card.querySelector('.runtime-display');
+            const timerDiv = card.querySelector('.timer-display');
+            if(runtimeDiv) { runtimeDiv.innerText = runtimeText; runtimeDiv.style.display = runtimeText ? 'block' : 'none'; }
+            if(timerDiv) { timerDiv.innerText = timerText; timerDiv.style.display = timerText ? 'block' : 'none'; }
+
+            if (!card.classList.contains('card-loading')) {
+                const isActive = sw.state; 
+                const statusText = card.querySelector('.device-status');
+                const iconDiv = card.querySelector('.device-icon');
+                
+                let baseClass = 'device-card';
+                if (!isOnline) baseClass += ' device-offline';
+                else if (isActive) baseClass += ' is-active';
+                card.className = baseClass;
+
+                if(iconDiv) iconDiv.className = isActive ? 'device-icon icon-on' : 'device-icon icon-off';
+                if(statusText) {
+                    statusText.className = isActive ? 'device-status text-on' : 'device-status text-off';
+                    statusText.innerText = isActive ? 'ON' : 'OFF';
+                }
+            }
         });
     });
-
-    // 4. REMOVE STALE CARDS (Handles Admin deleting devices or unlinking users)
-    const allCards = grid.querySelectorAll('.device-card');
-    allCards.forEach(card => {
-        if (!activeDomIds.has(card.id)) {
-            card.style.opacity = '0';
-            card.style.transform = 'scale(0.8)';
-            setTimeout(() => card.remove(), 300); // Smooth exit animation
-        }
-    });
-}
-
-// Helper to keep logic clean
-function updateTimersDisplay(card, sw, isOnline) {
-    let runtimeText = "", timerText = "";
-    if (isOnline && sw.state && sw.lastOnTime) {
-        const diffMs = new Date() - new Date(sw.lastOnTime);
-        const mins = Math.floor(diffMs / 60000);
-        const hrs = Math.floor(mins / 60);
-        runtimeText = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins} mins`;
-    }
-    if (isOnline && sw.state && sw.timerExpiresAt) {
-        const timeLeftMs = new Date(sw.timerExpiresAt) - new Date();
-        if (timeLeftMs > 0) timerText = `${Math.ceil(timeLeftMs / 60000)}m left`;
-    }
-
-    const runtimeDiv = card.querySelector('.runtime-display');
-    const timerDiv = card.querySelector('.timer-display');
-    if(runtimeDiv) { runtimeDiv.innerText = runtimeText; runtimeDiv.style.display = runtimeText ? 'block' : 'none'; }
-    if(timerDiv) { timerDiv.innerText = timerText; timerDiv.style.display = timerText ? 'block' : 'none'; }
 }
 
 async function toggleDevice(deviceId, switchId, newState, cardElement) {
@@ -947,170 +912,3 @@ window.closeSensorModal = () => {
     const modal = document.getElementById('sensor-modal');
     if(modal) modal.classList.add('hidden');
 };
-
-
-// --- TASK PAGE INITIALIZATION ---
-async function initTasks() {
-    loadTasks(); // Fetch existing schedules
-    
-    // Day Selection Toggle Logic
-    const dayButtons = document.querySelectorAll('.day-btn');
-    dayButtons.forEach(btn => {
-        btn.onclick = (e) => {
-            e.currentTarget.classList.toggle('selected');
-        };
-    });
-}
-
-// 1. Open the Modal and Load Appliances
-window.openTaskModal = async () => {
-    const select = document.getElementById('task-device-select');
-    select.innerHTML = '<option>Loading devices...</option>';
-    document.getElementById('task-modal').classList.remove('hidden');
-
-    try {
-        // Fetch your devices to let you pick which one to schedule
-        const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
-        const devices = await res.json();
-        
-        select.innerHTML = ''; // Clear loading text
-        devices.forEach(device => {
-            device.switches.forEach(sw => {
-                const opt = document.createElement('option');
-                // Store both deviceId and switchId so the server knows exactly what to turn on
-                opt.value = `${device.deviceId}-${sw.id}`; 
-                opt.innerText = `${sw.name} (${device.deviceId})`;
-                select.appendChild(opt);
-            });
-        });
-    } catch (err) {
-        select.innerHTML = '<option>Error loading devices</option>';
-    }
-};
-
-window.closeTaskModal = () => {
-    document.getElementById('task-modal').classList.add('hidden');
-};
-
-// 2. Save the Task to Database
-window.saveTask = async () => {
-    const deviceVal = document.getElementById('task-device-select').value;
-    const [deviceId, switchId] = deviceVal.split('-');
-    const onTime = document.getElementById('task-on').value;
-    const offTime = document.getElementById('task-off').value;
-    
-    // Collect which days were highlighted (M, T, W, etc.)
-    const selectedDays = Array.from(document.querySelectorAll('.day-btn.selected'))
-                              .map(btn => parseInt(btn.dataset.day));
-
-    if (!onTime || !offTime || selectedDays.length === 0) {
-        return showToast("Please set times and select at least one day", "warning");
-    }
-
-    try {
-        const res = await fetch(`${API_URL}/tasks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-            body: JSON.stringify({ 
-                deviceId, 
-                switchId: parseInt(switchId), 
-                onTime, 
-                offTime, 
-                days: selectedDays 
-            })
-        });
-
-        if (res.ok) {
-            showToast("Schedule Created Successfully!", "success");
-            closeTaskModal();
-            loadTasks(); // Refresh the list to show the new task
-        }
-    } catch (err) {
-        showToast("Server Error", "error");
-    }
-};
-
-// 3. Load and Display the Task List
-async function loadTasks() {
-    const list = document.getElementById('tasks-list');
-    if (!list) return;
-
-    try {
-        const res = await fetch(`${API_URL}/tasks`, { 
-            headers: { 'x-access-token': token } 
-        });
-        const tasks = await res.json();
-        
-        list.innerHTML = ''; // Clear loading text
-        
-        if (tasks.length === 0) {
-            list.innerHTML = '<p style="text-align: center; color: #999; margin-top: 50px;">No schedules set.</p>';
-            return;
-        }
-
-        tasks.forEach(task => {
-            const card = document.createElement('div');
-            card.className = `task-card ${task.isEnabled ? '' : 'disabled'}`;
-            // Professional Card Styling matching your theme
-            card.style.cssText = "background:white; padding:15px; border-radius:12px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 5px rgba(0,0,0,0.05); margin-bottom:10px;";
-            
-            const daysMap = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-            const activeDays = task.days.map(d => daysMap[d]).join(', ');
-
-            card.innerHTML = `
-                <div class="task-info">
-                    <div style="font-weight:600; color:#333;">${task.switchName || 'Appliance'}</div>
-                    <div style="font-size:0.85rem; color:#3b82f6; font-weight:700;">
-                        <i class="fa-solid fa-clock"></i> ${task.onTime} - ${task.offTime}
-                    </div>
-                    <div style="font-size:0.75rem; color:#999; margin-top:3px;">Repeats: ${activeDays}</div>
-                </div>
-                <div style="display:flex; align-items:center; gap:15px;">
-                    <label class="switch">
-                        <input type="checkbox" ${task.isEnabled ? 'checked' : ''} onchange="toggleTask('${task._id}', this.checked)">
-                        <span class="slider"></span>
-                    </label>
-                    <button onclick="deleteTask('${task._id}')" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:1.1rem;">
-                        <i class="fa-solid fa-trash-can"></i>
-                    </button>
-                </div>
-            `;
-            list.appendChild(card);
-        });
-    } catch (err) {
-        list.innerText = "Error loading schedules.";
-    }
-}
-
-// 4. Toggle Task (Enable/Disable)
-window.toggleTask = async (taskId, isEnabled) => {
-    try {
-        const res = await fetch(`${API_URL}/tasks/${taskId}/toggle`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-            body: JSON.stringify({ isEnabled })
-        });
-        if (res.ok) {
-            showToast(isEnabled ? "Schedule Enabled" : "Schedule Disabled", "info");
-            loadTasks(); // Refresh UI to show disabled state
-        }
-    } catch (err) { showToast("Failed to toggle task", "error"); }
-};
-
-// 5. Delete Task
-window.deleteTask = async (taskId) => {
-    if (!confirm("Are you sure you want to delete this schedule?")) return;
-    try {
-        const res = await fetch(`${API_URL}/tasks/${taskId}`, {
-            method: 'DELETE',
-            headers: { 'x-access-token': token }
-        });
-        if (res.ok) {
-            showToast("Schedule Deleted", "success");
-            loadTasks();
-        }
-    } catch (err) { showToast("Delete failed", "error"); }
-};
-
-// Ensure initTasks() is called in the Router
-if (path.includes('tasks.html')) initTasks();

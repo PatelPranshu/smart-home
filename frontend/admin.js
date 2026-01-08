@@ -1,45 +1,6 @@
 // const API_URL = 'http://localhost:3000/api';
 const API_URL = 'https://smart-home-04m4.onrender.com/api';
 
-
-// ==========================================
-// TOAST NOTIFICATION SYSTEM (Shared with App)
-// ==========================================
-const style = document.createElement('style');
-style.innerHTML = `
-  .toast-container { position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 10px; color: #111; }
-  .toast { min-width: 250px; padding: 16px; border-radius: 12px; background: white; box-shadow: 0 5px 15px rgba(0,0,0,0.15); display: flex; align-items: center; animation: slideIn 0.3s ease; border-left: 6px solid #333; font-family: 'Inter', sans-serif; font-size: 0.95rem; font-weight: 500; }
-  .toast.success { border-color: #22c55e; } .toast.success i { color: #22c55e; }
-  .toast.error { border-color: #ef4444; } .toast.error i { color: #ef4444; }
-  .toast.warning { border-color: #f59e0b; } .toast.warning i { color: #f59e0b; }
-  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-`;
-document.head.appendChild(style);
-
-function showToast(message, type = 'info') {
-    let container = document.querySelector('.toast-container');
-    if (!container) {
-        container = document.createElement('div');
-        container.className = 'toast-container';
-        document.body.appendChild(container);
-    }
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    let icon = 'fa-circle-info';
-    if(type === 'success') icon = 'fa-circle-check';
-    if(type === 'error') icon = 'fa-circle-exclamation';
-    if(type === 'warning') icon = 'fa-triangle-exclamation';
-    toast.innerHTML = `<i class="fa-solid ${icon}" style="margin-right:12px; font-size:1.3rem;"></i> <span>${message}</span>`;
-    container.appendChild(toast);
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateX(100%)';
-        toast.style.transition = 'all 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-
-
 // [HARDWARE] Pin Map matching Firmware (GPIOs)
 const PIN_MAP = [
     { r: 22, s: 15 }, // Relay 1 & Switch 1 (Matches Code Index 0)
@@ -159,28 +120,36 @@ function closeCreateModal() {
 }
 
 async function submitCreateDevice() {
-    const deviceId = document.getElementById('new-device-id').value.trim();
+    const deviceId = document.getElementById('new-device-id').value;
     const secretCode = document.getElementById('new-secret-code').value;
-    const channels = document.getElementById('new-channels').value;
+    const channels = document.getElementById('new-channels').value; // Get channel count
 
-    if(!deviceId) return showToast("Device ID is required", "warning");
+    if(!deviceId) return alert("Device ID is required");
 
     try {
         const res = await fetch(`${API_URL}/admin/create`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-            body: JSON.stringify({ deviceId, secretCode, channels })
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-access-token': token 
+            },
+            body: JSON.stringify({ deviceId, secretCode, channels }) // Send channels to backend
         });
         
         const data = await res.json();
         if(res.ok) {
-            showToast("Device Created Successfully!", "success");
             closeCreateModal();
             loadData(); 
+            const tempDev = { 
+                deviceId, 
+                secretCode, 
+                switches: new Array(parseInt(channels)).fill({ inverted: false }) 
+            };
+            showQr(tempDev); 
         } else {
-            showToast(data.error || "Creation Failed", "error");
+            alert(data.error);
         }
-    } catch(err) { showToast("Server Error", "error"); }
+    } catch(err) { alert("Error creating device"); }
 }
 
 // 6. EDIT CONFIGURATION LOGIC
@@ -202,13 +171,12 @@ async function submitEditChannels() {
         });
 
         if (res.ok) {
-            showToast("Hardware Profile Updated", "success");
             document.getElementById('edit-modal').style.display = 'none';
             loadData(); 
         } else {
-            showToast("Update Failed", "error");
+            alert("Update Failed");
         }
-    } catch(err) { showToast("Connection Error", "error"); }
+    } catch(err) { alert("Server Error"); }
 }
 
 // 7. UNLINK USER LOGIC
@@ -220,30 +188,20 @@ async function unlinkUser(id) {
             headers: { 'Content-Type': 'application/json', 'x-access-token': token },
             body: JSON.stringify({ deviceId: id })
         });
-        if(res.ok) {
-            showToast("User unlinked successfully", "success");
-            loadData();
-        } else {
-            showToast("Unlink failed", "error");
-        }
-    } catch(err) { showToast("Server Error", "error"); }
+        if(res.ok) loadData();
+    } catch(err) { alert("Action failed"); }
 }
 
 // 8. DELETE DEVICE LOGIC
 async function deleteDevice(id) {
-    if(!confirm(`Permanently delete ${id}?`)) return;
+    if(!confirm(`Permanently delete ${id}? This cannot be undone.`)) return;
     try {
         const res = await fetch(`${API_URL}/admin/device/${id}`, {
             method: 'DELETE',
             headers: { 'x-access-token': token }
         });
-        if(res.ok) {
-            showToast("Device deleted from system", "error"); // Red toast for deletion
-            loadData();
-        } else {
-            showToast("Delete failed", "error");
-        }
-    } catch(err) { showToast("Server Error", "error"); }
+        if(res.ok) loadData();
+    } catch(err) { alert("Delete failed"); }
 }
 
 // 9. DYNAMIC PINOUT DISPLAY
@@ -443,17 +401,23 @@ async function toggleInversion(deviceId, switchId, isInverted) {
     try {
         const res = await fetch(`${API_URL}/admin/device/invert-logic`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-access-token': token 
+            },
             body: JSON.stringify({ deviceId, switchId, inverted: isInverted })
         });
 
         if (res.ok) {
-            showToast(`Switch ${switchId + 1} logic updated`, "success");
+            console.log(`Switch ${switchId} inversion set to ${isInverted}`);
+            // Refresh main table data to keep current state in memory
             loadData(); 
         } else {
-            showToast("Logic update failed", "error");
+            alert("Failed to update inversion logic");
         }
-    } catch (err) { showToast("Server Error", "error"); }
+    } catch (err) {
+        alert("Server Error while updating logic");
+    }
 }
 
 // 11. LOGOUT
