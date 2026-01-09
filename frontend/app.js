@@ -173,7 +173,21 @@ async function initHome() {
 
 
     fetchDevices();
-    setInterval(fetchDevices, 2000); 
+    // 1. Initialize Socket Connection
+    const socket = io(API_URL.replace('/api', ''), { 
+        transports: ['websocket'] 
+    });
+
+    // Debugging logs
+    socket.on('connect', () => console.log("✅ Connected to Real-time Server:", socket.id));
+    socket.on('connect_error', (err) => console.error("❌ Socket Connection Error:", err));
+
+    // 2. Listen for real-time updates
+    socket.on('deviceUpdate', (data) => { 
+        console.log("📱 Real-time update received:", data);
+        // Optimization: Small delay to let DB write complete before fetching
+        setTimeout(fetchDevices, 200); 
+    });
 
     window.currentDeviceId = null;
     window.currentSwitchId = null;
@@ -783,15 +797,25 @@ function renderGrid(devices) {
 
             // Update Online Overlay
             const overlay = card.querySelector('.offline-overlay');
+            const optionsBtn = card.querySelector('.card-options'); // Select the dots button
+
             if (isOnline) {
                 card.classList.remove('device-offline');
                 overlay.classList.add('hidden');
-                // Re-attach click listener if it was lost
+                
+                // Main card click for toggling
                 card.onclick = () => toggleDevice(device.deviceId, sw.id, !sw.state, card);
+
+                // Specific listener for the dots button
+                optionsBtn.onclick = (e) => {
+                    e.stopPropagation(); // Stops the card's onclick from firing
+                    openModal(device.deviceId, sw.id, sw.name, sw.type); // Opens your settings popup
+                };
             } else {
                 card.classList.add('device-offline');
                 overlay.classList.remove('hidden');
                 card.onclick = null;
+                optionsBtn.onclick = null; // Disable settings for offline devices
             }
 
             // Update State (ON/OFF)

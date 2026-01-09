@@ -134,6 +134,12 @@ exports.setTimer = async (req, res) => {
                         source: 'timer'
                     });
                 }
+
+                // [ADD THIS] Push update to frontend when timer expires
+                const io = req.app.get('socketio'); //
+                if (io) io.emit('deviceUpdate', { deviceId, switchId, state: false }); //
+
+                
             } catch (timerErr) {
                 console.error("Timer Expiration Error:", timerErr);
             }

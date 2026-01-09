@@ -4,6 +4,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
 const morgan = require('morgan');
+const http = require('http'); 
+const { Server } = require('socket.io'); 
 const connectDB = require('./config/db');
 const mqttClient = require('./config/mqtt');
 const startScheduler = require('./utils/scheduler');
@@ -11,6 +13,18 @@ const { globalLimiter } = require('./middleware/limiter');
 
 // Initialize Express App
 const app = express();
+const server = http.createServer(app);
+
+// Initialize Socket.io with CORS matching your Express setup
+const io = new Server(server, { //
+    cors: {
+        origin: [process.env.FRONTEND_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean),
+        methods: ["GET", "POST"]
+    }
+});
+
+// Make io accessible in your controllers via req.app.get('socketio')
+app.set('socketio', io); //
 
 // 1. DATABASE CONNECTION
 connectDB();
@@ -67,6 +81,16 @@ app.use(mongoSanitize());
 // Global Rate Limiting
 app.use(globalLimiter);
 
+// Socket.io Connection Logic
+io.on('connection', (socket) => { //
+    console.log('📱 A user connected:', socket.id);
+    
+    socket.on('disconnect', () => {
+        console.log('📱 User disconnected');
+    });
+});
+
+
 // 3. ROUTES MOUNTING
 app.use('/api', require('./routes/deviceRoutes')); 
 app.use('/api', require('./routes/historyRoutes'));
@@ -84,6 +108,6 @@ startScheduler(mqttClient);
 
 // 5. SERVER START
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => { 
+server.listen(PORT, '0.0.0.0', () => { 
     console.log(`🚀 Smart Home Backend running at http://localhost:${PORT}`);
 });
