@@ -556,6 +556,7 @@ async function initSettings() {
 
     // Load immediately
     loadSettingsDevices();
+    setInterval(loadSettingsDevices, 3000);
 
 
     // --- REMOVE DEVICE LOGIC ---
