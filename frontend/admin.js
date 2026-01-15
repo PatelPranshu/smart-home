@@ -1,5 +1,5 @@
 // const API_URL = 'http://localhost:3000/api';
-const API_URL = 'https://smart-home-04m4.onrender.com/api';
+const API_URL = 'https://smart-home-rl4v.onrender.com/api';
 
 
 // ==========================================
