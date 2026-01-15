@@ -159,9 +159,8 @@ function initLogin() {
 async function initHome() {
     const dateOptions = { weekday: 'long', month: 'long', day: 'numeric' };
     document.getElementById('date-display').innerText = new Date().toLocaleDateString('en-US', dateOptions);
-    
 
-    // --- NEW: Fetch Custom Title ---
+    // --- Fetch Custom Title ---
     try {
         const res = await fetch(`${API_URL}/user/profile`, { headers: { 'x-access-token': token } });
         const data = await res.json();
@@ -177,18 +176,21 @@ async function initHome() {
     window.currentDeviceId = null;
     window.currentSwitchId = null;
     window.selectedType = 'light';
+    window.timerInterval = null; // Store interval ID to clear it later
 
+    // --- UPDATED: Open Modal Logic ---
     window.openModal = (deviceId, switchId, name, type) => {
         window.currentDeviceId = deviceId;
         window.currentSwitchId = switchId;
         window.selectedType = (type || 'light').toLowerCase(); 
 
         document.getElementById('edit-name').value = name;
+        
+        // 1. Reset UI State
         document.getElementById('timer-hrs').value = "";
         document.getElementById('timer-mins').value = "";
-
-        document.querySelectorAll('.type-option').forEach(el => el.classList.remove('selected'));
         
+        document.querySelectorAll('.type-option').forEach(el => el.classList.remove('selected'));
         let activeOption = document.querySelector(`.type-option[data-type="${window.selectedType}"]`);
         if (!activeOption) {
              window.selectedType = 'light';
@@ -196,10 +198,52 @@ async function initHome() {
         }
         if (activeOption) activeOption.classList.add('selected');
 
+        // 2. CHECK FOR ACTIVE TIMER
+        const device = window.allDevices.find(d => d.deviceId === deviceId);
+        const sw = device ? device.switches.find(s => s.id === switchId) : null;
+
+        const inputUI = document.getElementById('timer-input-ui');
+        const activeUI = document.getElementById('timer-active-ui');
+        const countdownEl = document.getElementById('timer-countdown');
+
+        // Clear any previous interval
+        if (window.timerInterval) clearInterval(window.timerInterval);
+
+        if (sw && sw.timerExpiresAt && new Date(sw.timerExpiresAt) > new Date()) {
+            // SHOW Active Timer UI
+            inputUI.classList.add('hidden');
+            activeUI.classList.remove('hidden');
+
+            // Function to update countdown text
+            const updateTime = () => {
+                const diff = new Date(sw.timerExpiresAt) - new Date();
+                if (diff <= 0) {
+                    // Timer finished while modal open -> Switch to input view
+                    inputUI.classList.remove('hidden');
+                    activeUI.classList.add('hidden');
+                    clearInterval(window.timerInterval);
+                } else {
+                    const m = Math.ceil((diff / 1000 / 60) % 60);
+                    const h = Math.floor((diff / 1000 / 60 / 60));
+                    countdownEl.innerText = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+                }
+            };
+            
+            updateTime(); // Run immediately
+            window.timerInterval = setInterval(updateTime, 1000); // Update every second
+
+        } else {
+            // SHOW Input UI
+            inputUI.classList.remove('hidden');
+            activeUI.classList.add('hidden');
+        }
+
         document.getElementById('edit-modal').classList.remove('hidden');
     };
 
+    // --- UPDATED: Close Modal ---
     window.closeModal = () => {
+        if (window.timerInterval) clearInterval(window.timerInterval); // Stop counting
         document.getElementById('edit-modal').classList.add('hidden');
     };
 
@@ -244,7 +288,36 @@ async function initHome() {
             });
             window.closeModal();
             fetchDevices();
+            showToast("Timer set successfully", "success");
         } catch (err) { showToast("Failed to set timer", "error"); }
+    };
+
+    // --- NEW: Cancel Timer Function ---
+    window.cancelTimer = async () => {
+        try {
+            const res = await fetch(`${API_URL}/timer/cancel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ 
+                    deviceId: window.currentDeviceId, 
+                    switchId: window.currentSwitchId 
+                })
+            });
+
+            if (res.ok) {
+                // Switch UI back to Input Mode immediately
+                document.getElementById('timer-active-ui').classList.add('hidden');
+                document.getElementById('timer-input-ui').classList.remove('hidden');
+                if (window.timerInterval) clearInterval(window.timerInterval);
+                
+                showToast("Timer Cancelled", "success");
+                fetchDevices(); // Refresh data
+            } else {
+                showToast("Failed to cancel timer", "error");
+            }
+        } catch (err) {
+            showToast("Server Error", "error");
+        }
     };
 }
 
@@ -281,7 +354,7 @@ async function initEnergy() {
                 item.className = 'history-item';
                 item.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);";
                 
-                const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
                 const dateStr = new Date(log.timestamp).toLocaleDateString();
                 
                 // --- FIX: Handle missing action safely ---
@@ -809,6 +882,9 @@ function renderGrid(devices) {
                 let baseClass = 'device-card';
                 if (!isOnline) baseClass += ' device-offline';
                 else if (isActive) baseClass += ' is-active';
+
+                // If timerText has content, add the 'has-timer' class
+                if (timerText) baseClass += ' has-timer';
                 card.className = baseClass;
 
                 if(iconDiv) iconDiv.className = isActive ? 'device-icon icon-on' : 'device-icon icon-off';

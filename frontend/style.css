@@ -294,6 +294,7 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 .device-card:active { transform: scale(0.96); }
 .device-card:hover { box-shadow: var(--shadow-hover); }
 .device-card.is-active { border-color: #dbeafe; }
+.device-card.has-timer { border-color: #f59e0b !important; }
 
 .card-header {
     display: flex;
@@ -823,11 +824,12 @@ input:checked + .slider:before { transform: translateX(24px); }
 }
 
 
+
 /* =========================================
-   VIEW TOGGLES & LIST VIEW STYLES (FINAL FIX)
+   VIEW TOGGLES & LIST VIEW STYLES (2-COLUMN COMPACT)
    ========================================= */
 
-/* 1. Toggle Buttons */
+/* 1. Toggle Buttons (Unchanged) */
 .view-toggles {
     display: flex;
     background: #f3f4f6;
@@ -854,22 +856,24 @@ input:checked + .slider:before { transform: translateX(24px); }
     box-shadow: 0 2px 5px rgba(0,0,0,0.05);
 }
 
-/* 2. List View Container */
+/* 2. List View Container: 2-COLUMN GRID */
 .device-grid.list-view {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    /* Force 2 columns */
+    grid-template-columns: repeat(2, minmax(0, 1fr)); 
+    gap: 10px;
     padding-bottom: 100px;
+    height: auto;
 }
 
 /* 3. List View Card Transformation */
 .device-grid.list-view .device-card {
-    flex-direction: row;
-    align-items: center;
+    flex-direction: row;       /* Horizontal layout */
+    align-items: center;       /* Vertically center items */
     justify-content: flex-start;
-    min-height: 70px;
-    padding: 0 15px;
-    gap: 15px;
+    min-height: 65px;          /* Compact height */
+    padding: 8px 12px;         /* Tighter padding */
+    gap: 10px;
 }
 
 /* 4. Ungroup Header */
@@ -877,76 +881,85 @@ input:checked + .slider:before { transform: translateX(24px); }
     display: contents;
 }
 
-/* 5. Icon Positioning (FIXED SHRINKING) */
+/* 5. Icon Styling */
 .device-grid.list-view .device-icon {
     order: 1;
-    width: 42px;
-    height: 42px;
-    font-size: 1.1rem;
+    width: 36px;              /* Smaller icon circle */
+    height: 36px;
+    font-size: 1rem;          /* Smaller icon */
     margin: 0;
-    flex-shrink: 0; /* CRITICAL: Prevents icon from squishing on long text */
+    flex-shrink: 0;
 }
 
-/* 6. Footer Layout (Name Left, Timer Right) */
+/* 6. Footer Layout (Name + Timer in Column) */
 .device-grid.list-view .card-footer {
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;    /* Stack Name and Info Vertically */
+    align-items: flex-start;   /* Left align */
+    justify-content: center;
     order: 2;
     flex-grow: 1;
     background: transparent;
     padding: 0;
     margin: 0;
     width: auto;
-    min-width: 0; /* Required for text truncation to work in flex child */
+    min-width: 0;
+    gap: 2px;                  /* Space between Name and Timer */
 }
 
-/* Left Side: Name & Status */
+/* HIDE the left wrapper's default behavior so we can customize children directly */
 .device-grid.list-view .footer-left {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    flex: 1;        /* Take up available space */
-    min-width: 0;   /* Allow text truncation */
-    padding-right: 10px; /* Space between text and timer */
+    display: contents; /* Ungroups this div so Name/Status are direct children of footer */
 }
 
-/* Right Side: Timers (FIXED: HORIZONTAL) */
+/* HIDE the Status Text ("ON/OFF") */
+.device-grid.list-view .device-status {
+    display: none !important;
+}
+
+/* Device Name Styling */
+.device-grid.list-view .device-name {
+    font-size: 0.9rem;
+    margin-bottom: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+}
+
+/* 7. Timer & Runtime Location (Moved below Name) */
 .device-grid.list-view .footer-right {
     display: flex;
-    flex-direction: row;     /* Horizontal layout */
+    flex-direction: row;       /* Timers side-by-side if both exist */
     align-items: center;
-    justify-content: flex-end;
-    gap: 8px;                /* Space between runtime and timer */
-    flex-shrink: 0;          /* Ensure timer doesn't get squashed */
-}
-
-/* Text Tweaks for List */
-.device-grid.list-view .device-name {
-    font-size: 1rem;
-    margin-bottom: 2px;
-}
-
-.device-grid.list-view .device-status {
-    font-size: 0.8rem;
+    justify-content: flex-start;
+    gap: 6px;
+    width: 100%;
+    margin-top: 0;
+    min-height: 14px;          /* Reserve space even if empty to keep alignment */
 }
 
 /* Timer Text Styling */
-.device-grid.list-view .runtime-display,
-.device-grid.list-view .timer-display {
-    font-size: 0.75rem;
+.device-grid.list-view .runtime-display {
+    font-size: 0.65rem;
     margin: 0;
-    white-space: nowrap; /* Keep timer text on one line */
+    line-height: 1;
+    white-space: nowrap;
 }
 
-/* 7. Menu Dots Positioning */
+/* HIDE Auto Off Timer in List View */
+.device-grid.list-view .timer-display {
+    display: none !important;
+}
+
+/* 8. Menu Dots (Far Right) */
 .device-grid.list-view .card-options {
     order: 3;
     position: static;
-    margin-left: 0;
+    margin-left: auto;         /* Push to right */
     width: auto;
     height: auto;
-    padding: 5px;
+    padding: 0 0 0 5px;        /* Little padding on left */
     flex-shrink: 0;
+    font-size: 1rem;
 }

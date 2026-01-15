@@ -779,6 +779,34 @@ app.post('/api/timer', auth, async (req, res) => {
   }
 });
 
+
+// [NEW] Cancel Timer Endpoint
+app.post('/api/timer/cancel', auth, async (req, res) => {
+  const { deviceId, switchId } = req.body;
+  const timerKey = `${deviceId}-${switchId}`;
+
+  try {
+    // 1. Stop the Node.js Timeout
+    if (activeTimers[timerKey]) {
+      clearTimeout(activeTimers[timerKey]);
+      delete activeTimers[timerKey];
+    }
+
+    // 2. Remove Timer Data from DB
+    await Device.updateOne(
+      { deviceId: deviceId, "switches.id": switchId },
+      { $set: { "switches.$.timerExpiresAt": null } }
+    );
+
+    res.json({ status: 'timer_cancelled' });
+
+  } catch (err) {
+    console.error("Timer Cancel Error:", err);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+
 // Wi-Fi Config Update
 
 app.post('/api/wifi-config', auth, async (req, res) => {

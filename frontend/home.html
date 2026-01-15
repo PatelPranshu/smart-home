@@ -118,10 +118,21 @@
 
             <div class="modal-section">
                 <label>Auto Turn Off</label>
-                <div class="timer-row">
+                
+                <div id="timer-input-ui" class="timer-row">
                     <input type="number" maxlength="3" id="timer-hrs" placeholder="0"><span>Hr</span>
                     <input type="number" maxlength="3" id="timer-mins" placeholder="0"><span>Min</span>
                     <button onclick="setTimer()" class="btn-timer">Set</button>
+                </div>
+
+                <div id="timer-active-ui" class="hidden" style="display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 10px 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <i class="fa-solid fa-clock" style="color:#f59e0b;"></i>
+                        <span id="timer-countdown" style="font-weight: 600; color: #374151;">--m left</span>
+                    </div>
+                    <button onclick="cancelTimer()" title="Cancel Timer" class="close-btn">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
                 </div>
             </div>
 
