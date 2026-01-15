@@ -70,7 +70,7 @@ String otaTopic; // [NEW] OTA Topic
 unsigned long lastWifiCheck = 0; 
 
 // CONFIGURATION: Thresholds
-const float TEMP_THRESHOLD = 1.0; 
+const float TEMP_THRESHOLD = 0.2; 
 const float HUM_THRESHOLD = 10.0;
 
 unsigned long lastDhtCheck = 0;   

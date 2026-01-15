@@ -182,11 +182,16 @@ async function initHome() {
     socket.on('connect', () => console.log("✅ Connected to Real-time Server:", socket.id));
     socket.on('connect_error', (err) => console.error("❌ Socket Connection Error:", err));
 
-    // 2. Listen for real-time updates
+    // 2. Listen for real-time updates (WITH DEBOUNCING)
+    let fetchTimeout;
     socket.on('deviceUpdate', (data) => { 
-        console.log("📱 Real-time update received:", data);
-        // Optimization: Small delay to let DB write complete before fetching
-        setTimeout(fetchDevices, 200); 
+        // console.log("📱 Real-time update received:", data);
+        
+        // Clear previous timer if a new update arrives immediately
+        clearTimeout(fetchTimeout);
+        
+        // Wait 300ms for updates to "settle" before calling the server once
+        fetchTimeout = setTimeout(fetchDevices, 300); 
     });
 
     window.currentDeviceId = null;
@@ -379,6 +384,20 @@ async function initSettings() {
     const userEmail = localStorage.getItem('userEmail') || "User"; 
     document.getElementById('username-display').innerText = userEmail;
 
+    // --- [ADD THIS: Socket connection for Settings Page] ---
+    const socket = io(API_URL.replace('/api', ''), { 
+        transports: ['websocket'] 
+    });
+
+    let fetchTimeout;
+    socket.on('deviceUpdate', (data) => {
+        console.log("📱 Settings real-time update:", data);
+        clearTimeout(fetchTimeout);
+        // Debounce to prevent multiple refreshes if many sensors update at once
+        fetchTimeout = setTimeout(loadSettingsDevices, 300); 
+    });
+
+    
     // --- NEW: Load current title into input box ---
     try {
         const res = await fetch(`${API_URL}/user/profile`, { headers: { 'x-access-token': token } });
@@ -461,7 +480,10 @@ async function initSettings() {
         if(!container) return;
 
         try {
-            const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
+            const res = await fetch(`${API_URL}/devices?t=${Date.now()}`, { 
+                headers: { 'x-access-token': token },
+                cache: 'no-store' // Ensure we get fresh data
+            });
             const devices = await res.json();
 
             container.innerHTML = ''; 
@@ -500,14 +522,14 @@ async function initSettings() {
         } catch(err) {
             container.innerHTML = '<div style="padding:15px; color:red; text-align:center;">Error loading devices</div>';
         }
-    }
-
+    
     // Load immediately
     loadSettingsDevices();
-
+    }
 
     // --- REMOVE DEVICE LOGIC ---
     window.deviceToRemove = null;
+
 
     // 1. Click Trash Icon -> Open Modal
     window.initRemoveDevice = (deviceId) => {
@@ -1115,7 +1137,7 @@ window.toggleTask = async (taskId, isEnabled) => {
             body: JSON.stringify({ isEnabled })
         });
         if (res.ok) {
-            showToast(isEnabled ? "Schedule Enabled" : "Schedule Disabled", "info");
+                showToast(isEnabled ? "Schedule Enabled" : "Schedule Disabled", "info");
             loadTasks(); // Refresh UI to show disabled state
         }
     } catch (err) { showToast("Failed to toggle task", "error"); }

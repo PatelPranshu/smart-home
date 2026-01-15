@@ -11,6 +11,11 @@ const mqttClient = mqtt.connect(process.env.MQTT_URL, {
     protocol: 'mqtts' // Secure TLS
 });
 
+// --- ADD THIS BLOCK ---
+let ioInstance; 
+mqttClient.attachIO = (io) => { ioInstance = io; };
+// ----------------------
+
 mqttClient.on('connect', () => {
     console.log('Backend connected to MQTT Broker');
     mqttClient.subscribe('devices/+/update'); // Listener for manual flips
@@ -53,6 +58,8 @@ mqttClient.on('message', async (topic, message) => {
                 { deviceId: deviceId, "switches.id": data.switchId },
                 { $set: updateFields }
             );
+
+            if (ioInstance) ioInstance.emit('deviceUpdate', { deviceId, switchId: data.switchId, state: userIntentState });
 
             // BACKGROUND TASKS
             (async () => {
@@ -119,6 +126,9 @@ mqttClient.on('message', async (topic, message) => {
                 { new: true }
             ).lean();
 
+            // --- ADD THIS: Push status change to Frontend ---
+            if (ioInstance) ioInstance.emit('deviceUpdate', { deviceId });
+
             if (device && device.owner) {
                 const ownerRecord = await User.findById(device.owner).lean();
                 if (ownerRecord && ownerRecord.isGoogleLinked === true) {
@@ -146,6 +156,9 @@ mqttClient.on('message', async (topic, message) => {
                 { deviceId: deviceId },
                 { $set: { temperature: data.temp, humidity: data.hum } }
             );
+
+            // --- ADD THIS: Push sensor change to Frontend ---
+            if (ioInstance) ioInstance.emit('deviceUpdate', { deviceId });
         }
 
     } catch (err) {

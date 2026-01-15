@@ -25,6 +25,7 @@ const io = new Server(server, { //
 
 // Make io accessible in your controllers via req.app.get('socketio')
 app.set('socketio', io); //
+mqttClient.attachIO(io); // Link Socket.io to MQTT for real-time updates
 
 // 1. DATABASE CONNECTION
 connectDB();
