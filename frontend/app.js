@@ -3,8 +3,8 @@
 // ==========================================
 
 // Determine API URL (Localhost vs Render)
-// const API_URL = 'http://localhost:3000/api';
-const API_URL = 'https://smart-home-04m4.onrender.com/api';
+const API_URL = 'http://localhost:3000/api';
+// const API_URL = 'https://smart-home-04m4.onrender.com/api';
 
 // Global State
 const token = localStorage.getItem('token');
@@ -912,3 +912,44 @@ window.closeSensorModal = () => {
     const modal = document.getElementById('sensor-modal');
     if(modal) modal.classList.add('hidden');
 };
+
+// ... existing code ...
+
+// =========================================
+// VIEW TOGGLE LOGIC (LIST vs GRID)
+// =========================================
+
+// 1. Initialize View on Load
+document.addEventListener('DOMContentLoaded', () => {
+    // Check local storage for preference, default to 'grid'
+    const savedView = localStorage.getItem('deviceViewMode') || 'grid';
+    setView(savedView);
+});
+
+// 2. Toggle Function
+function setView(mode) {
+    const gridContainer = document.getElementById('device-grid');
+    const btnList = document.getElementById('btn-list');
+    const btnGrid = document.getElementById('btn-grid');
+
+    if (!gridContainer || !btnList || !btnGrid) return;
+
+    // Reset State
+    gridContainer.classList.remove('list-view');
+    btnList.classList.remove('active');
+    btnGrid.classList.remove('active');
+
+    if (mode === 'list') {
+        gridContainer.classList.add('list-view');
+        btnList.classList.add('active');
+    } else {
+        btnGrid.classList.add('active');
+    }
+
+    localStorage.setItem('deviceViewMode', mode);
+}
+
+// Init on load
+document.addEventListener('DOMContentLoaded', () => {
+    setView(localStorage.getItem('deviceViewMode') || 'grid');
+});
