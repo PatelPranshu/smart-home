@@ -801,6 +801,21 @@ async function fetchDevices() {
 function renderGrid(devices) {
     const grid = document.getElementById('device-grid');
     if(!grid) return;
+    
+
+    // --- NEW: Global Offline Check ---
+    // If we have devices, but ALL of them are offline, warn the user globally
+    const allOffline = devices.length > 0 && devices.every(d => !d.isOnline);
+    if (allOffline) {
+        // You can use your existing showToast function
+        // Debounce this so it doesn't spam (simple check)
+        if (!window.hasShownOfflineToast) {
+            showToast("⚠️ System Offline: Cannot reach Devices", "error");
+            window.hasShownOfflineToast = true;
+        }
+    } else {
+        window.hasShownOfflineToast = false;
+    }
 
     devices.forEach(device => {
         const isOnline = device.isOnline;
@@ -867,7 +882,10 @@ function renderGrid(devices) {
             if(nameEl) nameEl.innerText = sw.name;
 
             const iconEl = card.querySelector('.device-icon i');
-            if(iconEl && !card.classList.contains('card-loading')) iconEl.className = `fa-solid ${iconClass}`;
+            if (iconEl && !card.classList.contains('card-loading')) {
+                // If offline, show broken link. If online, show device type.
+                iconEl.className = isOnline ? `fa-solid ${iconClass}` : 'fa-solid fa-link-slash';
+            }
 
             const runtimeDiv = card.querySelector('.runtime-display');
             const timerDiv = card.querySelector('.timer-display');

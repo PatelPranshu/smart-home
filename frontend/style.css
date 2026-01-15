@@ -369,18 +369,20 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
 .card-options:hover { color: #000; background: rgba(0, 0, 0, 0.1); }
 .device-card.is-active .card-options { color: #1e3a8a; }
 
-/* Offline & Loading States */
-.device-offline { pointer-events: none; }
-.device-offline .card-header, .device-offline .card-footer, .device-offline .card-options { filter: blur(4px); opacity: 0.5; }
-
-.offline-overlay {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 50;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    color: #ef4444; font-weight: 700; background: rgba(255, 255, 255, 0.4);
+/* Offline & Loading States (Modern Ghost Style) */
+.device-offline { 
+    pointer-events: none; 
+    opacity: 0.6;              /* Dim the card */
+    filter: grayscale(100%);   /* Remove all color */
+    background: #f9fafb;       /* Optional: Make background slightly gray */
+    border-color: #e5e7eb;     /* Ensure border is dull */
+    transition: all 0.3s ease;
 }
-.offline-overlay i { font-size: 2rem; margin-bottom: 5px; }
 
+/* HIDE the old overlay so we can see the icon/text */
+.offline-overlay {
+    display: none !important; 
+}
 .spinner {
     display: none;
     width: 24px; height: 24px;
