@@ -261,10 +261,14 @@ async function initEnergy() {
                 headers: { 'x-access-token': token },
                 cache: 'no-store'
             });
+
+            if (!res.ok) throw new Error(`Server Error: ${res.status}`);
+
             const logs = await res.json();
             
             list.innerHTML = ''; 
-            if (logs.length === 0) {
+            
+            if (!Array.isArray(logs) || logs.length === 0) {
                 const emptyMsg = document.createElement('p');
                 emptyMsg.style.cssText = 'text-align:center; color:#999; margin-top:20px;';
                 emptyMsg.textContent = 'No activity in the last 24 hours.';
@@ -279,7 +283,12 @@ async function initEnergy() {
                 
                 const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const dateStr = new Date(log.timestamp).toLocaleDateString();
-                const isOne = log.action.includes("ON");
+                
+                // --- FIX: Handle missing action safely ---
+                const actionText = log.action || "Unknown Action"; 
+                const isOne = actionText.includes("ON");
+                // -----------------------------------------
+
                 const color = isOne ? '#22c55e' : '#ef4444';
                 const icon = isOne ? 'fa-toggle-on' : 'fa-toggle-off';
 
@@ -290,7 +299,7 @@ async function initEnergy() {
                 // Icon Wrapper
                 const iconDiv = document.createElement('div');
                 iconDiv.style.cssText = `width:40px; height:40px; background:#f3f4f6; border-radius:50%; display:flex; align-items:center; justify-content:center; color:${color}; font-size:1.2rem;`;
-                iconDiv.innerHTML = `<i class="fa-solid ${icon}"></i>`; // Icons are trusted static classes
+                iconDiv.innerHTML = `<i class="fa-solid ${icon}"></i>`; 
 
                 // Text Wrapper
                 const textDiv = document.createElement('div');
@@ -298,12 +307,12 @@ async function initEnergy() {
                 // Device Name (SECURE)
                 const nameEl = document.createElement('div');
                 nameEl.style.cssText = "font-weight:600; color:#333;";
-                nameEl.textContent = log.switchName; // Uses textContent to prevent XSS
+                nameEl.textContent = log.switchName || "Unknown Device"; 
 
                 // Action Text (SECURE)
                 const actionEl = document.createElement('div');
                 actionEl.style.cssText = "font-size:0.8rem; color:#666;";
-                actionEl.textContent = log.action; // Uses textContent to prevent XSS
+                actionEl.textContent = actionText; 
 
                 textDiv.appendChild(nameEl);
                 textDiv.appendChild(actionEl);
@@ -331,7 +340,10 @@ async function initEnergy() {
                 list.appendChild(item);
             });
 
-        } catch(err) { list.innerText = "Failed to load history."; }
+        } catch(err) { 
+            console.error("History Load Error:", err);
+            list.innerText = `Failed to load history. (${err.message})`; 
+        }
     }
 
     loadHistory();
