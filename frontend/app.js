@@ -731,10 +731,11 @@ async function initSettings() {
 
     window.submitWifiSettings = async () => {
         const deviceId = document.getElementById('device-select').value;
-        const ssid = document.getElementById('wifi-ssid').value;
-        const pass = document.getElementById('wifi-pass').value;
+        const ssid = document.getElementById('wifi-ssid').value.trim();
+        const pass = document.getElementById('wifi-pass').value.trim();
 
         if (!ssid || !pass) return showToast("Please fill all fields", "warning");
+        if (pass.length < 8) return showToast("Password too short", "warning");
 
         showToast("Sending configuration... Device will restart shortly.", "info");
 
