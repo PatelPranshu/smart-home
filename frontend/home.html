@@ -122,6 +122,19 @@
                 </div>
             </div>
 
+            <!-- Fan Speed — only visible when type = fan -->
+            <div id="fan-speed-section" class="modal-section hidden">
+                <label>Fan Speed</label>
+                <div class="modal-speed-wrap">
+                    <input type="range" id="modal-fan-speed" min="1" max="4" step="1" value="1" class="speed-slider">
+                    <div class="speed-labels">
+                        <span>Low</span><span>Mid</span><span>High</span><span>Turbo</span>
+                    </div>
+                </div>
+                <div id="modal-speed-label"
+                    style="text-align:center;font-size:0.8rem;color:#3b82f6;font-weight:700;margin-top:4px;">Low</div>
+            </div>
+
             <div class="modal-section">
                 <label>Auto Turn Off</label>
 

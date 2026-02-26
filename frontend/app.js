@@ -3,8 +3,8 @@
 // ==========================================
 
 // Determine API URL (Localhost vs Render)
-// const API_URL = 'http://localhost:3000/api';
-const API_URL = 'https://smart-home-04m4.onrender.com/api';
+const API_URL = 'http://localhost:3000/api';
+// const API_URL = 'https://smart-home-04m4.onrender.com/api';
 
 // Global State
 const token = localStorage.getItem('token');
@@ -238,6 +238,31 @@ async function initHome() {
             activeUI.classList.add('hidden');
         }
 
+        // 3. FAN SPEED SECTION: show only if type is fan
+        const fanSection = document.getElementById('fan-speed-section');
+        const fanSlider = document.getElementById('modal-fan-speed');
+        const fanLabel = document.getElementById('modal-speed-label');
+        const speedNames = ['', 'Low', 'Medium', 'High', 'Turbo'];
+        window.currentFanSpeed = (sw && sw.speed) ? sw.speed : 1;
+
+        if (fanSection) {
+            if (window.selectedType === 'fan') {
+                fanSection.classList.remove('hidden');
+                if (fanSlider) fanSlider.value = window.currentFanSpeed;
+                if (fanLabel) fanLabel.innerText = speedNames[window.currentFanSpeed] || 'Low';
+            } else {
+                fanSection.classList.add('hidden');
+            }
+
+            if (fanSlider) {
+                // Replace handler each time modal opens
+                fanSlider.oninput = () => {
+                    window.currentFanSpeed = parseInt(fanSlider.value);
+                    if (fanLabel) fanLabel.innerText = speedNames[window.currentFanSpeed] || '';
+                };
+            }
+        }
+
         document.getElementById('edit-modal').classList.remove('hidden');
     };
 
@@ -251,6 +276,12 @@ async function initHome() {
         window.selectedType = type;
         document.querySelectorAll('.type-option').forEach(el => el.classList.remove('selected'));
         event.currentTarget.classList.add('selected');
+
+        // Show fan speed slider only for fan type
+        const fanSection = document.getElementById('fan-speed-section');
+        if (fanSection) {
+            fanSection.classList.toggle('hidden', type !== 'fan');
+        }
     };
 
     window.saveChanges = async () => {
@@ -266,6 +297,12 @@ async function initHome() {
                     newType: window.selectedType
                 })
             });
+
+            // If fan type, also apply the selected speed
+            if (window.selectedType === 'fan' && window.currentFanSpeed) {
+                await setFanSpeed(window.currentDeviceId, window.currentSwitchId, window.currentFanSpeed, null);
+            }
+
             window.closeModal();
             fetchDevices();
         } catch (err) { showToast("Failed to save changes", "error"); }
@@ -863,30 +900,11 @@ function renderGrid(devices) {
                     <div class="card-header">
                         <div class="device-icon"><i class="fa-solid ${iconClass}"></i><div class="spinner"></div></div>
                     </div>
-                    ${dbType === 'fan' ? `<div class="speed-dots" data-did="${device.deviceId}" data-sid="${sw.id}">
-                        <button class="speed-dot" data-speed="1" title="Low"></button>
-                        <button class="speed-dot" data-speed="2" title="Medium"></button>
-                        <button class="speed-dot" data-speed="3" title="High"></button>
-                        <button class="speed-dot" data-speed="4" title="Turbo"></button>
-                    </div>` : ''}
                     <div class="card-footer">
                         <div class="footer-left"><div class="device-name">${sw.name}</div><div class="device-status">OFF</div></div>
                         <div class="footer-right"><div class="runtime-display"></div><div class="timer-display"></div></div>
                     </div>`;
                 grid.appendChild(card);
-
-                // Attach speed-dot click handlers once on card creation
-                if (dbType === 'fan') {
-                    card.querySelectorAll('.speed-dot').forEach(btn => {
-                        btn.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            const speed = parseInt(btn.dataset.speed);
-                            const did = btn.closest('.speed-dots').dataset.did;
-                            const sid = parseInt(btn.closest('.speed-dots').dataset.sid);
-                            setFanSpeed(did, sid, speed, card);
-                        });
-                    });
-                }
             }
 
             const overlay = card.querySelector('.offline-overlay');
@@ -943,16 +961,6 @@ function renderGrid(devices) {
                     statusText.className = isActive ? 'device-status text-on' : 'device-status text-off';
                     statusText.innerText = isActive ? 'ON' : 'OFF';
                 }
-            }
-            // FAN SPEED DOTS: Update active dot to reflect current speed
-            const speedDotsEl = card.querySelector('.speed-dots');
-            if (speedDotsEl) {
-                const currentSpeed = sw.speed || 0;
-                const fanOn = isOnline && sw.state;
-                speedDotsEl.style.display = fanOn ? 'flex' : 'none';
-                speedDotsEl.querySelectorAll('.speed-dot').forEach(btn => {
-                    btn.classList.toggle('active', parseInt(btn.dataset.speed) === currentSpeed);
-                });
             }
         });
     });
