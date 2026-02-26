@@ -10,6 +10,19 @@ const API_URL = 'https://smart-home-04m4.onrender.com/api';
 const token = localStorage.getItem('token');
 const path = window.location.pathname;
 
+// GLOBAL FETCH INTERCEPTOR
+const originalFetch = window.fetch;
+window.fetch = async function () {
+    const response = await originalFetch.apply(this, arguments);
+    if (response.status === 401) {
+        localStorage.removeItem('token');
+        if (!window.location.pathname.endsWith('index.html') && window.location.pathname !== '/') {
+            window.location.href = 'index.html';
+        }
+    }
+    return response;
+};
+
 // ==========================================
 // 0. TOAST NOTIFICATION SYSTEM
 // ==========================================

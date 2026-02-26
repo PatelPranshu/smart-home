@@ -28,6 +28,19 @@ const PIN_MAP = [
 // 1. Get Token
 const token = localStorage.getItem('token');
 
+// GLOBAL FETCH INTERCEPTOR
+const originalFetch = window.fetch;
+window.fetch = async function () {
+    const response = await originalFetch.apply(this, arguments);
+    if (response.status === 401) {
+        localStorage.removeItem('token');
+        if (!window.location.pathname.endsWith('index.html') && window.location.pathname !== '/') {
+            window.location.href = 'index.html';
+        }
+    }
+    return response;
+};
+
 // 2. CHECK AUTH ON LOAD
 if (!token) {
     alert("You must log in as an Admin first.");
