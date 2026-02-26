@@ -321,7 +321,7 @@ mqttClient.on('message', async (topic, message) => {
 
 
 // --- MIDDLEWARE ---
-const auth = (req, res, next) => {
+const auth = async (req, res, next) => {
     // Try finding the token in the standard "Authorization" header (Google uses this)
     let token = req.headers['authorization'];
 
@@ -342,6 +342,20 @@ const auth = (req, res, next) => {
 
     try {
         const verified = jwt.verify(token, process.env.JWT_SECRET);
+
+        // Fetch user to verify tokenVersion
+        const user = await User.findById(verified.id);
+        if (!user) {
+            return res.status(401).send("User not found");
+        }
+
+        // If the token doesn't have a version but the user does and it's > 0, or versions don't match, reject
+        const tokenVersion = verified.tokenVersion || 0;
+        if (user.tokenVersion !== tokenVersion) {
+            console.log("Auth Failed: Token version mismatch (logged out from all devices)");
+            return res.status(401).send("Session expired. Please log in again.");
+        }
+
         req.user = verified;
         next();
     } catch (err) {
@@ -425,10 +439,22 @@ app.post('/api/login', [
     if (!valid) return res.status(400).json({ error: 'Invalid password' });
 
     // BUG 1 FIX: Added expiresIn so tokens are not valid forever
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     // Send the role back to the frontend 
     res.json({ token, role: user.role });
+});
+
+// Logout All Devices
+app.post('/api/logout-all', auth, async (req, res) => {
+    try {
+        // Increment token version to invalidate all current tokens
+        await User.findByIdAndUpdate(req.user.id, { $inc: { tokenVersion: 1 } });
+        res.json({ status: 'ok', message: 'Logged out from all devices' });
+    } catch (err) {
+        console.error('Logout All Error:', err);
+        res.status(500).json({ error: 'Server Error' });
+    }
 });
 
 
@@ -964,7 +990,7 @@ app.post('/api/verify-code', auth, async (req, res) => {
 // Get 24-Hour History
 app.get('/api/history', auth, async (req, res) => {
     try {
-        // Fetch logs for this user, sorted by newest first
+        // Fetch logs for this user, sorted by newest first     
         const logs = await History.find({ owner: req.user.id }).sort({ timestamp: -1 });
         res.json(logs);
     } catch (err) {

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,8 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <link rel="stylesheet" href="admin.css">
-    
+
 </head>
+
 <body>
 
     <div id="auth-overlay">
@@ -26,11 +28,12 @@
 
     <header>
         <h2><i class="fa-solid fa-industry" style="color: #818cf8;"></i> Smart Home Factory</h2>
-        <button class="logout-btn" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+        <button class="logout-btn" onclick="openLogoutModal()"><i class="fa-solid fa-right-from-bracket"></i>
+            Logout</button>
     </header>
 
     <div class="container">
-        
+
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-val" id="val-devices">--</div>
@@ -51,7 +54,8 @@
         </div>
 
         <div class="section-header">
-            <h3><i class="fa-solid fa-list-check" style="margin-right: 10px; color: var(--primary);"></i>Device Inventory</h3>
+            <h3><i class="fa-solid fa-list-check" style="margin-right: 10px; color: var(--primary);"></i>Device
+                Inventory</h3>
             <button class="btn-create" onclick="openCreateModal()">
                 <i class="fa-solid fa-plus"></i> Manufacture Device
             </button>
@@ -69,7 +73,7 @@
                     </tr>
                 </thead>
                 <tbody id="device-table-body">
-                    </tbody>
+                </tbody>
             </table>
         </div>
 
@@ -78,14 +82,16 @@
     <div id="create-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <h3>Manufacture Device</h3>
-            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">Configure a new ESP32 unit for deployment.</p>
-            
+            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">Configure a new ESP32 unit for
+                deployment.</p>
+
             <div class="form-group">
                 <label>Device ID</label>
                 <input type="text" id="new-device-id" placeholder="e.g. esp32_A1B2C3...">
-                <p style="font-size: 0.75rem; color: #9ca3af; margin-top: 5px;">Use the ID printed in the ESP32 Serial Monitor.</p>
+                <p style="font-size: 0.75rem; color: #9ca3af; margin-top: 5px;">Use the ID printed in the ESP32 Serial
+                    Monitor.</p>
             </div>
-            
+
             <div class="form-group">
                 <label>Secret Code (Sticker)</label>
                 <input type="text" id="new-secret-code" value="123456">
@@ -99,10 +105,12 @@
                     <option value="9" selected>9 Channels (Max)</option>
                 </select>
             </div>
-            
+
             <div style="display:flex; gap:15px; margin-top: 25px;">
-                <button class="btn-create" style="flex:1; justify-content: center;" onclick="submitCreateDevice()">Create Unit</button>
-                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;" onclick="closeCreateModal()">Cancel</button>
+                <button class="btn-create" style="flex:1; justify-content: center;"
+                    onclick="submitCreateDevice()">Create Unit</button>
+                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;"
+                    onclick="closeCreateModal()">Cancel</button>
             </div>
         </div>
     </div>
@@ -111,9 +119,9 @@
         <div class="modal-content">
             <h3>Edit Configuration</h3>
             <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Change hardware capabilities.</p>
-            
+
             <input type="hidden" id="edit-device-id">
-            
+
             <div class="form-group">
                 <label>Active Channels</label>
                 <select id="edit-channels" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px;">
@@ -122,10 +130,12 @@
                     <option value="9">9 Channels (Max)</option>
                 </select>
             </div>
-            
+
             <div style="display:flex; gap:10px; margin-top: 20px;">
-                <button class="btn-create" style="flex:1; justify-content:center;" onclick="submitEditChannels()">Save Changes</button>
-                <button class="btn-del" style="flex:1; background:#f3f4f6; color:#333;" onclick="document.getElementById('edit-modal').style.display='none'">Cancel</button>
+                <button class="btn-create" style="flex:1; justify-content:center;" onclick="submitEditChannels()">Save
+                    Changes</button>
+                <button class="btn-del" style="flex:1; background:#f3f4f6; color:#333;"
+                    onclick="document.getElementById('edit-modal').style.display='none'">Cancel</button>
             </div>
         </div>
     </div>
@@ -133,16 +143,25 @@
     <div id="pin-modal" class="modal" style="display: none;">
         <div class="modal-content" style="width: 500px;">
             <h3><i class="fa-solid fa-microchip" style="color: #6366f1; margin-right: 8px;"></i> Device Pinout</h3>
-            <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Hardware connections for this configuration.</p>
+            <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Hardware connections for this configuration.
+            </p>
             <div style="background: #f8fafc; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;">
                 <table class="data-table" style="font-size:0.85rem;">
-                    <thead><tr><>Ch</ th><th>Relay Pin (Out)</th><th>Switch Pin (In)</th></tr></thead>
+                    <thead>
+                        <tr>
+                            <>Ch</ th>
+                            <th>Relay Pin (Out)</th>
+                            <th>Switch Pin (In)</th>
+                        </tr>
+                    </thead>
                     <tbody id="pin-table-body">
-                        </tbody>
+                    </tbody>
                 </table>
             </div>
             <br>
-            <button class="btn-del" style="background:#e5e7eb; color:#374151; width:100%; padding: 10px; font-weight: 600;" onclick="document.getElementById('pin-modal').style.display='none'">Close</button>
+            <button class="btn-del"
+                style="background:#e5e7eb; color:#374151; width:100%; padding: 10px; font-weight: 600;"
+                onclick="document.getElementById('pin-modal').style.display='none'">Close</button>
         </div>
     </div>
 
@@ -150,7 +169,7 @@
         <h2 style="margin-bottom: 10px; font-size: 1.2rem;">Hardware Configuration Card</h2>
         <div id="qrcode" style="display: flex; justify-content: center;"></div>
         <div class="qr-info" id="qr-text" style="margin: 10px 0;"></div>
-        
+
         <div id="qr-hardware-table"></div>
 
         <p style="margin-top:15px; font-size:0.75rem; color:#6b7280;">
@@ -169,31 +188,51 @@
 
 
     <div id="invert-modal" class="modal" style="display: none;">
-    <div class="modal-content" style="max-width: 500px;">
-        <h3><i class="fa-solid fa-repeat" style="color: var(--warning); margin-right: 10px;"></i> Logic Inversion</h3>
-        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">
-            Enable this if the relay is wired backward (Normally Closed instead of Normally Open).
-        </p>
-        
-        <div class="table-container" style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb;">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Switch</th>
-                        <th style="text-align: right;">Inverted?</th>
-                    </tr>
-                </thead>
-                <tbody id="invert-table-body">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3><i class="fa-solid fa-repeat" style="color: var(--warning); margin-right: 10px;"></i> Logic Inversion
+            </h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">
+                Enable this if the relay is wired backward (Normally Closed instead of Normally Open).
+            </p>
+
+            <div class="table-container" style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Switch</th>
+                            <th style="text-align: right;">Inverted?</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invert-table-body">
                     </tbody>
-            </table>
-        </div>
-        
-        <div style="margin-top: 25px;">
-            <button class="btn-del" style="width: 100%; background: #f3f4f6; color: #374151;" onclick="document.getElementById('invert-modal').style.display='none'">Close</button>
+                </table>
+            </div>
+
+            <div style="margin-top: 25px;">
+                <button class="btn-del" style="width: 100%; background: #f3f4f6; color: #374151;"
+                    onclick="document.getElementById('invert-modal').style.display='none'">Close</button>
+            </div>
         </div>
     </div>
-</div>
-    
+
+    <div id="logout-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px; text-align: center;">
+            <h3>Log Out Options</h3>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
+                Would you like to log out of only this device or all devices currently logged in?
+            </p>
+
+            <button onclick="logoutThisDevice()" class="btn-create"
+                style="width: 100%; background: #f59e0b; margin-bottom: 10px; justify-content: center;">Log Out Only
+                This Device</button>
+            <button onclick="logoutAllDevices()" class="btn-del"
+                style="width: 100%; justify-content: center; margin-bottom: 15px;">Log Out From All Devices</button>
+            <button onclick="closeLogoutModal()" class="btn-del"
+                style="width: 100%; background: #f3f4f6; color: #374151; justify-content: center;">Cancel</button>
+        </div>
+    </div>
+
     <script src="admin.js"></script>
 </body>
+
 </html>

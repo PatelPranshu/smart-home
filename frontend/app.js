@@ -1037,8 +1037,35 @@ async function setFanSpeed(deviceId, switchId, speed, cardElement) {
     }
 }
 function logout() {
+    logoutThisDevice();
+}
+
+function openLogoutModal() {
+    const modal = document.getElementById('modal-logout-options');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeLogoutModal() {
+    const modal = document.getElementById('modal-logout-options');
+    if (modal) modal.classList.add('hidden');
+}
+
+function logoutThisDevice() {
     localStorage.removeItem('token');
     window.location.href = 'index.html';
+}
+
+async function logoutAllDevices() {
+    try {
+        await fetch(`${API_URL}/logout-all`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token }
+        });
+    } catch (err) {
+        console.error("Logout all failed", err);
+    } finally {
+        logoutThisDevice();
+    }
 }
 
 // ==========================================

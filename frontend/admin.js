@@ -437,8 +437,35 @@ async function toggleInversion(deviceId, switchId, isInverted) {
 
 // 11. LOGOUT
 function logout() {
+    logoutThisDevice();
+}
+
+function openLogoutModal() {
+    const modal = document.getElementById('logout-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeLogoutModal() {
+    const modal = document.getElementById('logout-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function logoutThisDevice() {
     localStorage.removeItem('token');
     window.location.href = 'index.html';
+}
+
+async function logoutAllDevices() {
+    try {
+        await fetch(`${API_URL}/logout-all`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token }
+        });
+    } catch (err) {
+        console.error("Logout all failed", err);
+    } finally {
+        logoutThisDevice();
+    }
 }
 
 // 12. OVERLAY AUTH HANDLER (Optional if button exists)
