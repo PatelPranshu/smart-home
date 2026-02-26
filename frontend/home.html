@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,6 +11,7 @@
     <link rel="stylesheet" href="style.css">
     <script src="theme.js"></script>
 </head>
+
 <body>
     <div class="dashboard-container">
         <header style="align-items: center;">
@@ -17,18 +19,21 @@
                 <p id="date-display" style="margin-bottom: 4px;">Fetching date...</p>
                 <h2 id="dashboard-title" style="margin-bottom: 0;">My Home</h2>
             </div>
-            
-            <div onclick="openSensorModal()" style="background: #ffffff; padding: 10px 15px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); cursor: pointer; display: flex; flex-direction: column; gap: 8px; transition: transform 0.1s;">
-                
+
+            <div onclick="openSensorModal()"
+                style="background: #ffffff; padding: 10px 15px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); cursor: pointer; display: flex; flex-direction: column; gap: 8px; transition: transform 0.1s;">
+
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 28px; height: 28px; border-radius: 50%; background: #ffedd5; display: flex; align-items: center; justify-content: center; color: #f97316;">
+                    <div
+                        style="width: 28px; height: 28px; border-radius: 50%; background: #ffedd5; display: flex; align-items: center; justify-content: center; color: #f97316;">
                         <i class="fa-solid fa-temperature-half" style="font-size: 0.8rem;"></i>
                     </div>
                     <span id="temp-display" style="font-weight: 700; color: #111827; font-size: 0.95rem;">--°C</span>
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="width: 28px; height: 28px; border-radius: 50%; background: #dbeafe; display: flex; align-items: center; justify-content: center; color: #3b82f6;">
+                    <div
+                        style="width: 28px; height: 28px; border-radius: 50%; background: #dbeafe; display: flex; align-items: center; justify-content: center; color: #3b82f6;">
                         <i class="fa-solid fa-droplet" style="font-size: 0.8rem;"></i>
                     </div>
                     <span id="hum-display" style="font-weight: 700; color: #111827; font-size: 0.95rem;">--%</span>
@@ -49,7 +54,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div id="device-grid" class="device-grid"></div>
         </div>
 
@@ -72,13 +77,13 @@
             </div>
         </div>
     </div>
-<div id="edit-modal" class="modal-overlay hidden">
+    <div id="edit-modal" class="modal-overlay hidden">
         <div class="modal-card">
             <div class="modal-header">
                 <h3>Device Settings</h3>
                 <button onclick="closeModal()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            
+
             <div class="modal-section">
                 <label>Device Name</label>
                 <div class="input-with-icon">
@@ -99,14 +104,11 @@
                     <div class="type-option" onclick="selectType('ac')" data-type="ac">
                         <i class="fa-solid fa-snowflake"></i><span>AC</span>
                     </div>
-                    <div class="type-option" onclick="selectType('tv')" data-type="tv">
-                        <i class="fa-solid fa-tv"></i><span>TV</span>
+                    <div class="type-option" onclick="selectType('outlet')" data-type="outlet">
+                        <i class="fa-solid fa-plug"></i><span>Outlet</span>
                     </div>
                     <div class="type-option" onclick="selectType('wifi')" data-type="wifi">
                         <i class="fa-solid fa-wifi"></i><span>WiFi</span>
-                    </div>
-                    <div class="type-option" onclick="selectType('socket')" data-type="socket">
-                        <i class="fa-solid fa-plug"></i><span>Socket</span>
                     </div>
                     <div class="type-option" onclick="selectType('water')" data-type="water">
                         <i class="fa-solid fa-faucet-drip"></i><span>Pump</span>
@@ -114,18 +116,23 @@
                     <div class="type-option" onclick="selectType('laundry')" data-type="laundry">
                         <i class="fa-solid fa-shirt"></i><span>Wash</span>
                     </div>
-                </div> </div>
+                    <div class="type-option" onclick="selectType('other')" data-type="other">
+                        <i class="fa-solid fa-bolt"></i><span>Other</span>
+                    </div>
+                </div>
+            </div>
 
             <div class="modal-section">
                 <label>Auto Turn Off</label>
-                
+
                 <div id="timer-input-ui" class="timer-row">
                     <input type="number" maxlength="3" id="timer-hrs" placeholder="0"><span>Hr</span>
                     <input type="number" maxlength="3" id="timer-mins" placeholder="0"><span>Min</span>
                     <button onclick="setTimer()" class="btn-timer">Set</button>
                 </div>
 
-                <div id="timer-active-ui" class="hidden" style="display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 10px 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                <div id="timer-active-ui" class="hidden"
+                    style="display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 10px 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
                     <div style="display:flex; align-items:center; gap:10px;">
                         <i class="fa-solid fa-clock" style="color:#f59e0b;"></i>
                         <span id="timer-countdown" style="font-weight: 600; color: #374151;">--m left</span>
@@ -137,20 +144,25 @@
             </div>
 
             <button onclick="saveChanges()" class="btn-primary" style="margin-top: 20px;">Save Changes</button>
-        </div> </div> <div id="sensor-modal" class="modal-overlay hidden">
+        </div>
+    </div>
+    <div id="sensor-modal" class="modal-overlay hidden">
         <div class="modal-card">
             <div class="modal-header">
                 <h3>Select Primary Sensor</h3>
                 <button onclick="closeSensorModal()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            
-            <div id="sensor-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto;">
-                </div>
 
-            <button onclick="saveSensorSelection()" class="btn-primary" style="margin-top: 15px;">Set as Main Sensor</button>
+            <div id="sensor-list"
+                style="display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto;">
+            </div>
+
+            <button onclick="saveSensorSelection()" class="btn-primary" style="margin-top: 15px;">Set as Main
+                Sensor</button>
         </div>
     </div>
 
     <script src="app.js?v=2"></script>
 </body>
+
 </html>

@@ -34,11 +34,11 @@ function showToast(message, type = 'info') {
 
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    
+
     let icon = 'fa-circle-info';
-    if(type === 'success') icon = 'fa-circle-check';
-    if(type === 'error') icon = 'fa-circle-exclamation';
-    if(type === 'warning') icon = 'fa-triangle-exclamation';
+    if (type === 'success') icon = 'fa-circle-check';
+    if (type === 'error') icon = 'fa-circle-exclamation';
+    if (type === 'warning') icon = 'fa-triangle-exclamation';
 
     toast.innerHTML = `<i class="fa-solid ${icon}" style="margin-right:12px; font-size:1.3rem;"></i> <span>${message}</span>`;
     container.appendChild(toast);
@@ -56,11 +56,11 @@ const typeIcons = {
     'light': 'fa-lightbulb',
     'fan': 'fa-fan',
     'ac': 'fa-snowflake',
-    'tv': 'fa-tv',
+    'outlet': 'fa-plug',
     'wifi': 'fa-wifi',
-    'socket': 'fa-plug',
     'water': 'fa-faucet-drip',
-    'laundry': 'fa-shirt'
+    'laundry': 'fa-shirt',
+    'other': 'fa-bolt'
 };
 
 // --- ROUTER ---
@@ -171,7 +171,7 @@ async function initHome() {
 
 
     fetchDevices();
-    setInterval(fetchDevices, 2000); 
+    setInterval(fetchDevices, 2000);
 
     window.currentDeviceId = null;
     window.currentSwitchId = null;
@@ -182,19 +182,19 @@ async function initHome() {
     window.openModal = (deviceId, switchId, name, type) => {
         window.currentDeviceId = deviceId;
         window.currentSwitchId = switchId;
-        window.selectedType = (type || 'light').toLowerCase(); 
+        window.selectedType = (type || 'light').toLowerCase();
 
         document.getElementById('edit-name').value = name;
-        
+
         // 1. Reset UI State
         document.getElementById('timer-hrs').value = "";
         document.getElementById('timer-mins').value = "";
-        
+
         document.querySelectorAll('.type-option').forEach(el => el.classList.remove('selected'));
         let activeOption = document.querySelector(`.type-option[data-type="${window.selectedType}"]`);
         if (!activeOption) {
-             window.selectedType = 'light';
-             activeOption = document.querySelector(`.type-option[data-type="light"]`);
+            window.selectedType = 'light';
+            activeOption = document.querySelector(`.type-option[data-type="light"]`);
         }
         if (activeOption) activeOption.classList.add('selected');
 
@@ -228,7 +228,7 @@ async function initHome() {
                     countdownEl.innerText = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
                 }
             };
-            
+
             updateTime(); // Run immediately
             window.timerInterval = setInterval(updateTime, 1000); // Update every second
 
@@ -259,11 +259,11 @@ async function initHome() {
             await fetch(`${API_URL}/edit`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-                body: JSON.stringify({ 
-                    deviceId: window.currentDeviceId, 
-                    switchId: window.currentSwitchId, 
-                    newName, 
-                    newType: window.selectedType 
+                body: JSON.stringify({
+                    deviceId: window.currentDeviceId,
+                    switchId: window.currentSwitchId,
+                    newName,
+                    newType: window.selectedType
                 })
             });
             window.closeModal();
@@ -280,10 +280,10 @@ async function initHome() {
             await fetch(`${API_URL}/timer`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-                body: JSON.stringify({ 
-                    deviceId: window.currentDeviceId, 
-                    switchId: window.currentSwitchId, 
-                    minutes: (hrs * 60) + mins 
+                body: JSON.stringify({
+                    deviceId: window.currentDeviceId,
+                    switchId: window.currentSwitchId,
+                    minutes: (hrs * 60) + mins
                 })
             });
             window.closeModal();
@@ -298,9 +298,9 @@ async function initHome() {
             const res = await fetch(`${API_URL}/timer/cancel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-                body: JSON.stringify({ 
-                    deviceId: window.currentDeviceId, 
-                    switchId: window.currentSwitchId 
+                body: JSON.stringify({
+                    deviceId: window.currentDeviceId,
+                    switchId: window.currentSwitchId
                 })
             });
 
@@ -309,7 +309,7 @@ async function initHome() {
                 document.getElementById('timer-active-ui').classList.add('hidden');
                 document.getElementById('timer-input-ui').classList.remove('hidden');
                 if (window.timerInterval) clearInterval(window.timerInterval);
-                
+
                 showToast("Timer Cancelled", "success");
                 fetchDevices(); // Refresh data
             } else {
@@ -327,10 +327,10 @@ async function initHome() {
 // ==========================================
 async function initEnergy() {
     const list = document.getElementById('history-list');
-    
+
     async function loadHistory() {
         try {
-            const res = await fetch(`${API_URL}/history?t=${Date.now()}`, { 
+            const res = await fetch(`${API_URL}/history?t=${Date.now()}`, {
                 headers: { 'x-access-token': token },
                 cache: 'no-store'
             });
@@ -338,9 +338,9 @@ async function initEnergy() {
             if (!res.ok) throw new Error(`Server Error: ${res.status}`);
 
             const logs = await res.json();
-            
-            list.innerHTML = ''; 
-            
+
+            list.innerHTML = '';
+
             if (!Array.isArray(logs) || logs.length === 0) {
                 const emptyMsg = document.createElement('p');
                 emptyMsg.style.cssText = 'text-align:center; color:#999; margin-top:20px;';
@@ -353,12 +353,12 @@ async function initEnergy() {
                 const item = document.createElement('div');
                 item.className = 'history-item';
                 item.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);";
-                
+
                 const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
                 const dateStr = new Date(log.timestamp).toLocaleDateString();
-                
+
                 // --- FIX: Handle missing action safely ---
-                const actionText = log.action || "Unknown Action"; 
+                const actionText = log.action || "Unknown Action";
                 const isOne = actionText.includes("ON");
                 // -----------------------------------------
 
@@ -372,20 +372,20 @@ async function initEnergy() {
                 // Icon Wrapper
                 const iconDiv = document.createElement('div');
                 iconDiv.style.cssText = `width:40px; height:40px; background:#f3f4f6; border-radius:50%; display:flex; align-items:center; justify-content:center; color:${color}; font-size:1.2rem;`;
-                iconDiv.innerHTML = `<i class="fa-solid ${icon}"></i>`; 
+                iconDiv.innerHTML = `<i class="fa-solid ${icon}"></i>`;
 
                 // Text Wrapper
                 const textDiv = document.createElement('div');
-                
+
                 // Device Name (SECURE)
                 const nameEl = document.createElement('div');
                 nameEl.style.cssText = "font-weight:600; color:#333;";
-                nameEl.textContent = log.switchName || "Unknown Device"; 
+                nameEl.textContent = log.switchName || "Unknown Device";
 
                 // Action Text (SECURE)
                 const actionEl = document.createElement('div');
                 actionEl.style.cssText = "font-size:0.8rem; color:#666;";
-                actionEl.textContent = actionText; 
+                actionEl.textContent = actionText;
 
                 textDiv.appendChild(nameEl);
                 textDiv.appendChild(actionEl);
@@ -413,9 +413,9 @@ async function initEnergy() {
                 list.appendChild(item);
             });
 
-        } catch(err) { 
+        } catch (err) {
             console.error("History Load Error:", err);
-            list.innerText = `Failed to load history. (${err.message})`; 
+            list.innerText = `Failed to load history. (${err.message})`;
         }
     }
 
@@ -428,7 +428,7 @@ async function initEnergy() {
 // 5. PAGE: SETTINGS (settings.html)    
 // ==========================================
 async function initSettings() {
-    const userEmail = localStorage.getItem('userEmail') || "User"; 
+    const userEmail = localStorage.getItem('userEmail') || "User";
     document.getElementById('username-display').innerText = userEmail;
 
     // --- NEW: Load current title into input box ---
@@ -438,12 +438,12 @@ async function initSettings() {
         if (document.getElementById('input-home-title')) {
             document.getElementById('input-home-title').value = data.homeTitle || "";
         }
-    } catch (err) {}
+    } catch (err) { }
 
     // --- NEW: Save Function ---
     window.saveHomeTitle = async () => {
         const newTitle = document.getElementById('input-home-title').value;
-        if(!newTitle) return showToast("Title cannot be empty", "warning");
+        if (!newTitle) return showToast("Title cannot be empty", "warning");
 
         try {
             const res = await fetch(`${API_URL}/user-update`, {
@@ -452,9 +452,9 @@ async function initSettings() {
                 body: JSON.stringify({ homeTitle: newTitle })
             });
 
-            if(res.ok) showToast("Title Updated!", "success");
+            if (res.ok) showToast("Title Updated!", "success");
             else showToast("Update failed", "error");
-        } catch(err) { showToast("Server Error", "error"); }
+        } catch (err) { showToast("Server Error", "error"); }
     };
 
 
@@ -469,12 +469,12 @@ async function initSettings() {
         const data = await res.json();
         // Only show if linked
         if (data.isLinked) {
-            if(sectionEl) sectionEl.style.display = 'block'; // Show it
-            if(toggleEl) toggleEl.checked = data.enabled;
+            if (sectionEl) sectionEl.style.display = 'block'; // Show it
+            if (toggleEl) toggleEl.checked = data.enabled;
         } else {
-            if(sectionEl) sectionEl.style.display = 'none'; // Keep hidden
+            if (sectionEl) sectionEl.style.display = 'none'; // Keep hidden
         }
-    } catch(err) { console.error("Failed to fetch google settings"); }
+    } catch (err) { console.error("Failed to fetch google settings"); }
 
     // --- NEW: Handle Toggle Change ---
     window.toggleGoogleHome = async () => {
@@ -485,16 +485,16 @@ async function initSettings() {
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
                 body: JSON.stringify({ enabled: isEnabled })
             });
-            
-            if(isEnabled) showToast("Google Home Enabled", "success");
+
+            if (isEnabled) showToast("Google Home Enabled", "success");
             else showToast("Google Home Disabled (Devices will appear offline)", "warning");
-            
-        } catch(err) { 
+
+        } catch (err) {
             showToast("Failed to update settings", "error");
             toggleEl.checked = !isEnabled; // Revert UI on error
         }
     };
-    
+
     window.closeModals = () => {
         document.querySelectorAll('.modal-overlay').forEach(el => el.classList.add('hidden'));
     };
@@ -507,16 +507,27 @@ async function initSettings() {
         document.getElementById('modal-claim-device').classList.remove('hidden');
     };
 
-// --- NEW: Load User's Devices List ---
+    // SECURITY: Escape HTML special chars before injecting any DB value into innerHTML
+    function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    // --- NEW: Load User's Devices List ---
     async function loadSettingsDevices() {
         const container = document.getElementById('settings-device-list');
-        if(!container) return;
+        if (!container) return;
 
         try {
             const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
             const devices = await res.json();
 
-            container.innerHTML = ''; 
+            container.innerHTML = '';
 
             if (devices.length === 0) {
                 // Do not show empty text, just leave it empty so "Add Device" is the only item
@@ -524,9 +535,10 @@ async function initSettings() {
             }
 
             devices.forEach(d => {
+                const safeId = escapeHtml(d.deviceId);
                 const item = document.createElement('div');
                 item.className = 'list-item'; // Uses new CSS class
-                
+
                 const statusColor = d.isOnline ? '#22c55e' : '#ef4444';
                 const statusText = d.isOnline ? 'Online' : 'Offline';
 
@@ -536,20 +548,20 @@ async function initSettings() {
                             <i class="fa-solid fa-microchip"></i>
                         </div>
                         <div class="list-info">
-                            <span class="list-title">${d.deviceId}</span>
+                            <span class="list-title">${safeId}</span>
                             <span class="list-sub">
                                 <i class="fa-solid fa-circle" style="font-size:0.5rem; color:${statusColor}"></i> ${statusText}
                             </span>
                         </div>
                     </div>
-                    <button class="btn-trash" onclick="initRemoveDevice('${d.deviceId}')" title="Remove Device">
+                    <button class="btn-trash" onclick="initRemoveDevice('${safeId}')" title="Remove Device">
                         <i class="fa-solid fa-trash-can"></i>
                     </button>
                 `;
                 container.appendChild(item);
             });
 
-        } catch(err) {
+        } catch (err) {
             container.innerHTML = '<div style="padding:15px; color:red; text-align:center;">Error loading devices</div>';
         }
     }
@@ -572,7 +584,7 @@ async function initSettings() {
     // 2. Click "Remove" in Modal -> Verify & Delete
     window.submitDeviceRemoval = async () => {
         const password = document.getElementById('input-remove-pass').value;
-        
+
         if (!password) {
             showToast("Please enter your password", "warning");
             return;
@@ -605,7 +617,7 @@ async function initSettings() {
             } else {
                 showToast("Failed to remove device", "error");
             }
-        } catch(err) {
+        } catch (err) {
             showToast("Server Error", "error");
         }
     };
@@ -659,11 +671,11 @@ async function initSettings() {
 
             if (res.ok) {
                 window.closeModals();
-                document.getElementById('modal-change-pass').classList.remove('hidden'); 
+                document.getElementById('modal-change-pass').classList.remove('hidden');
             } else {
                 showToast("Invalid ESP32 Kit Code", "error");
             }
-        } catch (err) {showToast("Verification Error", "error"); }
+        } catch (err) { showToast("Verification Error", "error"); }
     };
 
     window.submitNewPassword = async () => {
@@ -705,8 +717,8 @@ async function initSettings() {
 
             if (res.ok) {
                 window.closeModals();
-                await loadDevicesForWifi(); 
-                document.getElementById('modal-wifi-settings').classList.remove('hidden'); 
+                await loadDevicesForWifi();
+                document.getElementById('modal-wifi-settings').classList.remove('hidden');
             } else {
                 showToast("Incorrect Password", "error");
             }
@@ -745,7 +757,7 @@ async function initSettings() {
                 headers: { 'Content-Type': 'application/json', 'x-access-token': token },
                 body: JSON.stringify({ deviceId, ssid, pass })
             });
-            
+
             setTimeout(() => {
                 showToast("Wi-Fi Update Sent!", "success");
                 window.closeModals();
@@ -761,23 +773,23 @@ async function initSettings() {
 // ==========================================
 async function fetchDevices() {
     const grid = document.getElementById('device-grid');
-    if (!grid) return; 
+    if (!grid) return;
 
     try {
-        const res = await fetch(`${API_URL}/devices?t=${Date.now()}`, { 
+        const res = await fetch(`${API_URL}/devices?t=${Date.now()}`, {
             headers: { 'x-access-token': token },
             cache: 'no-store'
         });
-        
+
         const devices = await res.json();
-        
+
         // --- NEW: Store globally for the popup to use ---
-        window.allDevices = devices; 
+        window.allDevices = devices;
 
         // --- UPDATED: Select device based on User Preference ---
         if (devices.length > 0) {
             let sensorDevice = null;
-            
+
             // 1. Check if user has a preferred sensor saved
             const preferredId = localStorage.getItem('primarySensorId');
             if (preferredId) {
@@ -791,19 +803,19 @@ async function fetchDevices() {
 
             const tempEl = document.getElementById('temp-display');
             const humEl = document.getElementById('hum-display');
-    
+
             if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
             if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
         }
-        
+
         renderGrid(devices);
     } catch (err) { console.error("Fetch error", err); }
 }
 
 function renderGrid(devices) {
     const grid = document.getElementById('device-grid');
-    if(!grid) return;
-    
+    if (!grid) return;
+
 
     // --- NEW: Global Offline Check ---
     // If we have devices, but ALL of them are offline, warn the user globally
@@ -825,7 +837,7 @@ function renderGrid(devices) {
         device.switches.forEach(sw => {
             const domId = `card-${device.deviceId}-${sw.id}`;
             let card = document.getElementById(domId);
-            const dbType = sw.type || 'light'; 
+            const dbType = sw.type || 'light';
             const iconClass = typeIcons[dbType] || 'fa-power-off';
 
             let runtimeText = "", timerText = "";
@@ -860,10 +872,10 @@ function renderGrid(devices) {
 
             const overlay = card.querySelector('.offline-overlay');
             const optionsBtn = card.querySelector('.card-options');
-            
+
             if (!isOnline) {
-                card.classList.add('device-offline'); 
-                overlay.classList.remove('hidden');   
+                card.classList.add('device-offline');
+                overlay.classList.remove('hidden');
                 card.onclick = null;
             } else {
                 card.classList.remove('device-offline');
@@ -873,15 +885,15 @@ function renderGrid(devices) {
                 }
             }
 
-            if(optionsBtn) {
+            if (optionsBtn) {
                 optionsBtn.onclick = (e) => {
                     e.stopPropagation();
-                    if(isOnline && window.openModal) window.openModal(device.deviceId, sw.id, sw.name, dbType);
+                    if (isOnline && window.openModal) window.openModal(device.deviceId, sw.id, sw.name, dbType);
                 };
             }
 
             const nameEl = card.querySelector('.device-name');
-            if(nameEl) nameEl.innerText = sw.name;
+            if (nameEl) nameEl.innerText = sw.name;
 
             const iconEl = card.querySelector('.device-icon i');
             if (iconEl && !card.classList.contains('card-loading')) {
@@ -891,14 +903,14 @@ function renderGrid(devices) {
 
             const runtimeDiv = card.querySelector('.runtime-display');
             const timerDiv = card.querySelector('.timer-display');
-            if(runtimeDiv) { runtimeDiv.innerText = runtimeText; runtimeDiv.style.display = runtimeText ? 'block' : 'none'; }
-            if(timerDiv) { timerDiv.innerText = timerText; timerDiv.style.display = timerText ? 'block' : 'none'; }
+            if (runtimeDiv) { runtimeDiv.innerText = runtimeText; runtimeDiv.style.display = runtimeText ? 'block' : 'none'; }
+            if (timerDiv) { timerDiv.innerText = timerText; timerDiv.style.display = timerText ? 'block' : 'none'; }
 
             if (!card.classList.contains('card-loading')) {
-                const isActive = sw.state; 
+                const isActive = sw.state;
                 const statusText = card.querySelector('.device-status');
                 const iconDiv = card.querySelector('.device-icon');
-                
+
                 let baseClass = 'device-card';
                 if (!isOnline) baseClass += ' device-offline';
                 else if (isActive) baseClass += ' is-active';
@@ -907,8 +919,8 @@ function renderGrid(devices) {
                 if (timerText) baseClass += ' has-timer';
                 card.className = baseClass;
 
-                if(iconDiv) iconDiv.className = isActive ? 'device-icon icon-on' : 'device-icon icon-off';
-                if(statusText) {
+                if (iconDiv) iconDiv.className = isActive ? 'device-icon icon-on' : 'device-icon icon-off';
+                if (statusText) {
                     statusText.className = isActive ? 'device-status text-on' : 'device-status text-off';
                     statusText.innerText = isActive ? 'ON' : 'OFF';
                 }
@@ -929,7 +941,7 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
             body: JSON.stringify({ deviceId, switchId, state: newState }),
             signal: controller.signal
         });
-        clearTimeout(timeoutId); 
+        clearTimeout(timeoutId);
 
         // --- NEW: Check for Rate Limit (429) ---
         if (response.status === 429) {
@@ -937,19 +949,19 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
             return; // Stop here so UI doesn't update falsely
         }
         // ----------------------------------------
-        
+
         if (!response.ok) throw new Error("Error");
 
         const statusText = cardElement.querySelector('.device-status');
         const iconDiv = cardElement.querySelector('.device-icon');
-        if(newState) {
+        if (newState) {
             cardElement.classList.add('is-active');
-            if(iconDiv) iconDiv.className = 'device-icon icon-on';
-            if(statusText) { statusText.classList.replace('text-off', 'text-on'); statusText.innerText = "ON"; }
+            if (iconDiv) iconDiv.className = 'device-icon icon-on';
+            if (statusText) { statusText.classList.replace('text-off', 'text-on'); statusText.innerText = "ON"; }
         } else {
             cardElement.classList.remove('is-active');
-            if(iconDiv) iconDiv.className = 'device-icon icon-off';
-            if(statusText) { statusText.classList.replace('text-on', 'text-off'); statusText.innerText = "OFF"; }
+            if (iconDiv) iconDiv.className = 'device-icon icon-off';
+            if (statusText) { statusText.classList.replace('text-on', 'text-off'); statusText.innerText = "OFF"; }
         }
     } catch (err) {
         if (err.name === 'AbortError') showToast("Timeout. Device may be offline.", "warning");
@@ -985,7 +997,7 @@ window.openSensorModal = () => {
     window.allDevices.forEach(d => {
         const item = document.createElement('label');
         item.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9fafb; border-radius: 8px; cursor: pointer; border: 1px solid #eee;";
-        
+
         const isChecked = (savedId === d.deviceId) ? 'checked' : '';
 
         item.innerHTML = `
@@ -1018,7 +1030,7 @@ window.saveSensorSelection = () => {
 
 window.closeSensorModal = () => {
     const modal = document.getElementById('sensor-modal');
-    if(modal) modal.classList.add('hidden');
+    if (modal) modal.classList.add('hidden');
 };
 
 // ... existing code ...
@@ -1027,12 +1039,7 @@ window.closeSensorModal = () => {
 // VIEW TOGGLE LOGIC (LIST vs GRID)
 // =========================================
 
-// 1. Initialize View on Load
-document.addEventListener('DOMContentLoaded', () => {
-    // Check local storage for preference, default to 'grid'
-    const savedView = localStorage.getItem('deviceViewMode') || 'grid';
-    setView(savedView);
-});
+// 1. Initialize View on Load — single listener only
 
 // 2. Toggle Function
 function setView(mode) {
@@ -1057,7 +1064,7 @@ function setView(mode) {
     localStorage.setItem('deviceViewMode', mode);
 }
 
-// Init on load
+// BUG FIX: Removed duplicate DOMContentLoaded — was calling setView() twice on every page load
 document.addEventListener('DOMContentLoaded', () => {
     setView(localStorage.getItem('deviceViewMode') || 'grid');
 });

@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -13,7 +14,7 @@ const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const { body, validationResult } = require('express-validator');
 const morgan = require('morgan');
-const { smarthome } = require('actions-on-google');
+const { google } = require('googleapis');
 const PORT = process.env.PORT || 3000;
 
 
@@ -26,44 +27,44 @@ app.set('trust proxy', 1);
 
 //CORS HERE ---
 app.use(cors({
-  origin: [process.env.FRONTEND_URL,"https://oauth-redirect.googleusercontent.com"].filter(Boolean),
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
-  credentials: true
+    origin: [process.env.FRONTEND_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean),
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
+    credentials: true
 }));
 
 // SECURITY HEADERS
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
-      styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
-      fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'", process.env.ORIGIN_URL],
-      formAction: [
-        "'self'", 
-        process.env.ORIGIN_URL, 
-        "https://oauth-redirect.googleusercontent.com"
-      ],
-    },  
-  },
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+            styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
+            imgSrc: ["'self'", "data:"],
+            connectSrc: ["'self'", process.env.ORIGIN_URL],
+            formAction: [
+                "'self'",
+                process.env.ORIGIN_URL,
+                "https://oauth-redirect.googleusercontent.com"
+            ],
+        },
+    },
 }));
 
 // GLOBAL LIMITER
 const globalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 Minute
-  max: 200,                // 200 requests
-  message: "Too many requests, please slow down."
+    windowMs: 1 * 60 * 1000, // 1 Minute
+    max: 200,                // 200 requests
+    message: "Too many requests, please slow down."
 });
 app.use(globalLimiter);
 
 // STRICT LIMITER (For Passwords, Codes, and Sensitive Actions)
 const authLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 Hour
-  max: 10,                   // 10 Attempts
-  message: "Too many failed attempts. Access locked for 1 hour."
+    windowMs: 60 * 60 * 1000, // 1 Hour
+    max: 10,                   // 10 Attempts
+    message: "Too many failed attempts. Access locked for 1 hour."
 });
 
 // Apply to Login (Existing)
@@ -78,12 +79,12 @@ app.use(express.json());
 
 // Patch for Express 5.0 Read-Only Query
 app.use((req, res, next) => {
-  Object.defineProperty(req, 'query', {
-    value: req.query,
-    writable: true,
-    configurable: true
-  });
-  next();
+    Object.defineProperty(req, 'query', {
+        value: req.query,
+        writable: true,
+        configurable: true
+    });
+    next();
 });
 
 
@@ -107,28 +108,52 @@ mongoose.connection.on('error', err => {
     console.error('Mongoose secondary error:', err);
 });
 
-const appSmartHome = smarthome({
-  jwt: process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : require('./smart-home-key.json')
-});
+// Google Home Graph — uses googleapis directly (actions-on-google reportState is deprecated)
+// Parses service account credentials from env var once at startup
+const serviceAccountKey = process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : null;
 
-  // Enable parsing form data for the login page
+/**
+ * Reports device state to Google Home Graph.
+ * @param {string} agentUserId  - The user's MongoDB _id as a string
+ * @param {object} states       - Map of { "deviceId-switchId": { on: bool, online: bool } }
+ */
+async function reportStateToGoogle(agentUserId, states) {
+    if (!serviceAccountKey) {
+        console.warn('reportStateToGoogle: No service account key configured, skipping.');
+        return;
+    }
+    const auth = new google.auth.GoogleAuth({
+        credentials: serviceAccountKey,
+        scopes: ['https://www.googleapis.com/auth/homegraph']
+    });
+    const homegraph = google.homegraph({ version: 'v1', auth });
+    await homegraph.devices.reportStateAndNotification({
+        requestBody: {
+            agentUserId,
+            requestId: Math.random().toString(),
+            payload: { devices: { states } }
+        }
+    });
+}
+
+// Enable parsing form data for the login page
 app.use(express.urlencoded({ extended: true }));
 
 
 
 // MQTT Client Setup (Connects to HiveMQ Cloud)
 const mqttClient = mqtt.connect(process.env.MQTT_URL, {
-  username: process.env.MQTT_USERNAME,
-  password: process.env.MQTT_PASSWORD,
-  protocol: 'mqtts' // Secure TLS
+    username: process.env.MQTT_USERNAME,
+    password: process.env.MQTT_PASSWORD,
+    protocol: 'mqtts' // Secure TLS
 });
 
 mqttClient.on('connect', () => {
-  console.log('Backend connected to MQTT Broker');
-  mqttClient.subscribe('devices/+/update'); // Listener for manual flips
-  mqttClient.subscribe('devices/+/sync');   // Listener for reboots
-  mqttClient.subscribe('devices/+/status'); // Listen for Online/Offline
-  mqttClient.subscribe('devices/+/sensor'); // Subscribe to sensor data
+    console.log('Backend connected to MQTT Broker');
+    mqttClient.subscribe('devices/+/update'); // Listener for manual flips
+    mqttClient.subscribe('devices/+/sync');   // Listener for reboots
+    mqttClient.subscribe('devices/+/status'); // Listen for Online/Offline
+    mqttClient.subscribe('devices/+/sensor'); // Subscribe to sensor data
 });
 
 // Handle MQTT Messages
@@ -136,19 +161,19 @@ mqttClient.on('message', async (topic, message) => {
     // [CRITICAL] Global try-catch to prevent server crashes on bad data
     try {
         const parts = topic.split('/');
-        
+
         // Safety Check: Ensure topic format is correct (devices/ID/type)
         if (parts.length < 3) return;
 
         const deviceId = parts[1];
-        const type = parts[2]; 
+        const type = parts[2];
 
         // -------------------------------------------------
         // 1. User flipped physical switch -> Update DB
         // -------------------------------------------------
         if (type === 'update') {
             const data = JSON.parse(message.toString());
-            
+
             // Use .lean() for faster lookup as we only need read-only inversion config here
             const device = await Device.findOne({ deviceId }).populate('owner', 'isGoogleLinked').lean();
 
@@ -180,7 +205,7 @@ mqttClient.on('message', async (topic, message) => {
             (async () => {
                 try {
                     // Log to History
-                    if (!device.owner) return;      
+                    if (!device.owner) return;
                     await History.create({
                         owner: device.owner._id,
                         deviceId: deviceId,
@@ -191,25 +216,15 @@ mqttClient.on('message', async (topic, message) => {
 
                     // REPORT STATE TO GOOGLE
 
-                    if (device.owner.isGoogleLinked === true) { 
+                    if (device.owner.isGoogleLinked === true) {
                         try {
-                            await appSmartHome.reportState({
-                                agentUserId: device.owner._id.toString(),
-                                requestId: Math.random().toString(),
-                                payload: {
-                                    devices: {
-                                        states: {
-                                            [`${deviceId}-${data.switchId}`]: {
-                                                on: userIntentState,
-                                                online: device.isOnline || true
-                                            }
-                                        }
-                                    }
-                                }
-                            });
+                            await reportStateToGoogle(
+                                device.owner._id.toString(),
+                                { [`${deviceId}-${data.switchId}`]: { on: userIntentState, online: device.isOnline || true } }
+                            );
                         } catch (error) {
-                            // If Google says 404, the user has unlinked their account.
-                            if (error.status === 404 || (error.response && error.response.status === 404)) {
+                            const status = error?.response?.status || error?.status;
+                            if (status === 404) {
                                 console.warn(`⚠️ User ${device.owner._id} unlinked from Google. Disabling auto-reporting.`);
                                 await User.findByIdAndUpdate(device.owner._id, { isGoogleLinked: false });
                             } else {
@@ -245,12 +260,12 @@ mqttClient.on('message', async (topic, message) => {
         else if (type === 'status') {
             const status = message.toString().trim();
             const isOnline = status === 'online';
-            
+
             const device = await Device.findOne({ deviceId }).lean();
 
             if (device && device.isOnline !== isOnline) {
                 console.log(`Device ${deviceId} is now ${status}`);
-                
+
                 await Device.updateOne(
                     { deviceId: deviceId },
                     { $set: { isOnline: isOnline } }
@@ -265,13 +280,13 @@ mqttClient.on('message', async (topic, message) => {
                             statesPayload[`${deviceId}-${sw.id}`] = { online: isOnline };
                         });
 
-                        appSmartHome.reportState({
-                            agentUserId: device.owner.toString(),
-                            requestId: Math.random().toString(),
-                            payload: { devices: { states: statesPayload } }
-                        }).catch(e => {
-                            // Optional: Handle 404 self-healing here too if you wish
-                        });
+                        reportStateToGoogle(device.owner.toString(), statesPayload)
+                            .catch(e => {
+                                const status = e?.response?.status || e?.status;
+                                if (status === 404) {
+                                    User.findByIdAndUpdate(device.owner, { isGoogleLinked: false }).catch(() => { });
+                                }
+                            });
                     }
                 }
             }
@@ -298,32 +313,32 @@ mqttClient.on('message', async (topic, message) => {
 
 // --- MIDDLEWARE ---
 const auth = (req, res, next) => {
-  // Try finding the token in the standard "Authorization" header (Google uses this)
-  let token = req.headers['authorization'];
-  
-  if (token && token.startsWith('Bearer ')) {
-      // Remove "Bearer " prefix to get just the token string
-      token = token.slice(7, token.length);
-  } 
-  // If not found, try the custom header (Your App uses this)
-  else if (req.headers['x-access-token']) {
-      token = req.headers['x-access-token'];
-  }
+    // Try finding the token in the standard "Authorization" header (Google uses this)
+    let token = req.headers['authorization'];
 
-  // If no token found in either place, reject
-  if (!token) {
-      console.log("Auth Failed: No token provided");
-      return res.status(401).send("Access Denied");
-  }
+    if (token && token.startsWith('Bearer ')) {
+        // Remove "Bearer " prefix to get just the token string
+        token = token.slice(7, token.length);
+    }
+    // If not found, try the custom header (Your App uses this)
+    else if (req.headers['x-access-token']) {
+        token = req.headers['x-access-token'];
+    }
 
-  try {
-    const verified = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = verified;
-    next();
-  } catch (err) {
-    console.log("Auth Failed: Invalid Token");
-    res.status(400).send("Invalid Token");
-  }
+    // If no token found in either place, reject
+    if (!token) {
+        console.log("Auth Failed: No token provided");
+        return res.status(401).send("Access Denied");
+    }
+
+    try {
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = verified;
+        next();
+    } catch (err) {
+        console.log("Auth Failed: Invalid Token");
+        res.status(400).send("Invalid Token");
+    }
 };
 
 
@@ -393,17 +408,18 @@ app.post('/api/login', [
     if (!errors.isEmpty()) {
         return res.status(400).json({ error: errors.array()[0].msg });
     }
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user) return res.status(400).json({ error: 'User not found' });
-  
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid) return res.status(400).json({ error: 'Invalid password' });
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ error: 'User not found' });
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
-  
-  // Send the role back to the frontend 
-  res.json({ token, role: user.role }); 
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(400).json({ error: 'Invalid password' });
+
+    // BUG 1 FIX: Added expiresIn so tokens are not valid forever
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    // Send the role back to the frontend 
+    res.json({ token, role: user.role });
 });
 
 
@@ -411,10 +427,10 @@ app.post('/api/login', [
 app.get('/api/user/profile', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
-        res.json({ 
-            email: user.email, 
-            role: user.role, 
-            homeTitle: user.homeTitle || "My Home" 
+        res.json({
+            email: user.email,
+            role: user.role,
+            homeTitle: user.homeTitle || "My Home"
         });
     } catch (err) { res.status(500).json({ error: "Failed to fetch profile" }); }
 });
@@ -451,9 +467,9 @@ app.post('/api/user-update', auth, [
 app.get('/api/user/google-status', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
-        res.json({ 
+        res.json({
             enabled: user.googleHomeEnabled,
-            isLinked: user.isGoogleLinked 
+            isLinked: user.isGoogleLinked
         });
     } catch (err) { res.status(500).json({ error: "Error" }); }
 });
@@ -470,10 +486,15 @@ app.post('/api/user/google-status', auth, async (req, res) => {
 // --- DEVICE API ---
 
 // Get User's Devices
+// BUG 6 FIX: Wrapped in try/catch so a DB error doesn't hang the request
 app.get('/api/devices', auth, async (req, res) => {
-  // .lean() makes this query much faster for production
-  const devices = await Device.find({ owner: req.user.id }).lean();
-  res.json(devices);
+    try {
+        // .lean() makes this query much faster for production
+        const devices = await Device.find({ owner: req.user.id }).lean();
+        res.json(devices);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch devices" });
+    }
 });
 
 // Claim a New Device (The "Sticker" Logic)
@@ -505,8 +526,8 @@ app.post('/api/claim-device', auth, async (req, res) => {
         device.owner = userId;
 
         // Reset switches to default state upon new ownership
-        device.switches.forEach(sw => sw.state = false); 
-        
+        device.switches.forEach(sw => sw.state = false);
+
         await device.save();
 
         console.log(`User ${userId} claimed device ${deviceId}`);
@@ -523,17 +544,17 @@ app.post('/api/remove-device', auth, async (req, res) => {
     try {
         // Find device owned by this user
         const device = await Device.findOne({ deviceId: deviceId, owner: req.user.id });
-        
+
         if (!device) {
             return res.status(404).json({ error: "Device not found or not owned by you." });
         }
 
         // Remove ownership
         device.owner = null;
-        
+
         // Reset switch states for safety
         device.switches.forEach(sw => sw.state = false);
-        
+
         await device.save();
 
         console.log(`User ${req.user.id} removed device ${deviceId}`);
@@ -563,11 +584,14 @@ app.post('/api/control', auth, [
         // MQTT Publish
         const sw = device.switches.find(s => s.id === switchId);
 
+        // BUG 4 FIX: Guard against undefined switch before reading sw.inverted
+        if (!sw) return res.status(404).json({ error: "Switch not found" });
+
         // INVERSION LOGIC: If inverted, send the opposite signal to the relay
         const hardwareSignal = sw.inverted ? !state : state;
         const payload = JSON.stringify({ switchId, state: hardwareSignal });
 
-mqttClient.publish(`devices/${deviceId}/command`, payload);
+        mqttClient.publish(`devices/${deviceId}/command`, payload);
 
         // Update Database
         let updateFields = { "switches.$.state": state };
@@ -600,26 +624,16 @@ mqttClient.publish(`devices/${deviceId}/command`, payload);
 
                 // Report to Google (The Slow Part)
                 try {
-                    // Only attempt if we think they are linked
                     const user = await User.findById(req.user.id).lean();
                     if (user && user.isGoogleLinked === true) {
-                        await appSmartHome.reportState({
-                            agentUserId: req.user.id,
-                            requestId: Math.random().toString(),
-                            payload: {
-                                devices: {
-                                    states: {
-                                        [`${deviceId}-${switchId}`]: {
-                                            on: state,
-                                            online: true
-                                        }
-                                    }
-                                }
-                            }
-                        });
+                        await reportStateToGoogle(
+                            req.user.id,
+                            { [`${deviceId}-${switchId}`]: { on: state, online: true } }
+                        );
                     }
                 } catch (error) {
-                    if (error.status === 404 || (error.response && error.response.status === 404)) {
+                    const status = error?.response?.status || error?.status;
+                    if (status === 404) {
                         await User.findByIdAndUpdate(req.user.id, { isGoogleLinked: false });
                     }
                 }
@@ -640,7 +654,7 @@ app.post('/api/edit', auth, [
     body('deviceId').isString().trim(),
     body('switchId').isInt(),
     body('newName').isString().trim().escape().isLength({ max: 30 }),
-    body('newType').isString().isIn(['light', 'fan', 'ac', 'outlet', 'wifi', 'socket', 'water', 'laundry'])
+    body('newType').isString().isIn(['light', 'fan', 'ac', 'outlet', 'wifi', 'other', 'water', 'laundry'])
 ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ error: "Invalid input" });
@@ -660,177 +674,185 @@ app.post('/api/edit', auth, [
 
 
 // Timer (Auto Turn Off)
-let activeTimers = {}; 
+let activeTimers = {};
 
 app.post('/api/timer', auth, async (req, res) => {
-  const { deviceId, switchId, minutes } = req.body;
-  const timerKey = `${deviceId}-${switchId}`;
-  
-  // Clear existing timer if one is already running for this switch
-  if (activeTimers[timerKey]) clearTimeout(activeTimers[timerKey]);
+    const { deviceId, switchId, minutes } = req.body;
+    const timerKey = `${deviceId}-${switchId}`;
 
-  try {
-    // 1. Fetch device to check inversion settings
-    const device = await Device.findOne({ deviceId, owner: req.user.id });
-    if (!device) return res.status(404).json({ error: "Device not found" });
-    
-    const sw = device.switches.find(s => s.id === switchId);
-    if (!sw) return res.status(404).json({ error: "Switch not found" });
+    // Clear existing timer if one is already running for this switch
+    if (activeTimers[timerKey]) clearTimeout(activeTimers[timerKey]);
 
-    const expiryDate = new Date(Date.now() + minutes * 60000);
+    try {
+        // 1. Fetch device to check inversion settings
+        const device = await Device.findOne({ deviceId, owner: req.user.id });
+        if (!device) return res.status(404).json({ error: "Device not found" });
 
-    // 2. TURN ON IMMEDIATELY (Apply Inversion Logic)
-    // If inverted, logical ON = hardware false (0)
-    const startSignal = sw.inverted ? false : true; 
-    const onPayload = JSON.stringify({ switchId, state: startSignal });
-    mqttClient.publish(`devices/${deviceId}/command`, onPayload);
+        const sw = device.switches.find(s => s.id === switchId);
+        if (!sw) return res.status(404).json({ error: "Switch not found" });
 
-    // 3. Update Database with logical ON state
-    await Device.updateOne(
-      { deviceId: deviceId, "switches.id": switchId },
-      { $set: { 
-          "switches.$.state": true,
-          "switches.$.lastOnTime": new Date(),
-          "switches.$.timerExpiresAt": expiryDate 
-        } 
-      }
-    );
+        const expiryDate = new Date(Date.now() + minutes * 60000);
 
-    // 4. Log "TURNED ON" History
-    await History.create({
-        owner: req.user.id,
-        deviceId: deviceId,
-        switchName: sw.name || `Switch ${switchId}`,
-        action: `Turned ON (Timer ${minutes}m)`,
-        timestamp: new Date()
-    });
+        // 2. TURN ON IMMEDIATELY (Apply Inversion Logic)
+        // If inverted, logical ON = hardware false (0)
+        const startSignal = sw.inverted ? false : true;
+        const onPayload = JSON.stringify({ switchId, state: startSignal });
+        mqttClient.publish(`devices/${deviceId}/command`, onPayload);
 
-    // 5. Start the countdown
-    activeTimers[timerKey] = setTimeout(async () => {
-      console.log(`Timer expired! Turning off ${deviceId} switch ${switchId}`);
-      
-      // Re-fetch to get current inversion status in case it changed during the timer
-      const deviceAtExpiry = await Device.findOne({ deviceId });
-      const swAtExpiry = deviceAtExpiry ? deviceAtExpiry.switches.find(s => s.id === switchId) : null;
-      
-      // 6. Turn OFF Logic (Apply Inversion Logic)
-      // If inverted, logical OFF = hardware true (1)
-      const endSignal = (swAtExpiry && swAtExpiry.inverted) ? true : false;
-      const offPayload = JSON.stringify({ switchId, state: endSignal });
-      mqttClient.publish(`devices/${deviceId}/command`, offPayload);
-      
-      // 7. Update Database with logical OFF state
-      await Device.updateOne(
-        { deviceId: deviceId, "switches.id": switchId },
-        { $set: { 
-            "switches.$.state": false,
-            "switches.$.lastOnTime": null,
-            "switches.$.timerExpiresAt": null
-          } 
-        }
-      );
-
-      // 8. Log "Turned OFF" History
-      if (deviceAtExpiry) {
-          await History.create({
-              owner: deviceAtExpiry.owner, 
-              deviceId: deviceId,
-              switchName: swAtExpiry ? swAtExpiry.name : `Switch ${switchId}`,
-              action: "Turned OFF (Timer)",
-              timestamp: new Date()
-          });
-      }
-      if (deviceAtExpiry && deviceAtExpiry.owner) {
-        const ownerRecord = await User.findById(deviceAtExpiry.owner).lean();
-        if (ownerRecord && ownerRecord.isGoogleLinked === true) {
-            try {
-                await appSmartHome.reportState({
-                    agentUserId: deviceAtExpiry.owner.toString(),
-                    requestId: Math.random().toString(),
-                    payload: {
-                        devices: {
-                            states: {
-                                [`${deviceId}-${switchId}`]: {
-                                    on: false,
-                                    online: true
-                                }
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                // Self-Healing for Timers
-                if (error.status === 404 || (error.response && error.response.status === 404)) {
-                    console.warn(`⚠️ User ${deviceAtExpiry.owner} unlinked from Google during timer. Disabling reporting.`);
-                    await User.findByIdAndUpdate(deviceAtExpiry.owner, { isGoogleLinked: false });
+        // 3. Update Database with logical ON state
+        await Device.updateOne(
+            { deviceId: deviceId, "switches.id": switchId },
+            {
+                $set: {
+                    "switches.$.state": true,
+                    "switches.$.lastOnTime": new Date(),
+                    "switches.$.timerExpiresAt": expiryDate
                 }
             }
-        }
+        );
+
+        // 4. Log "TURNED ON" History
+        await History.create({
+            owner: req.user.id,
+            deviceId: deviceId,
+            switchName: sw.name || `Switch ${switchId}`,
+            action: `Turned ON (Timer ${minutes}m)`,
+            timestamp: new Date()
+        });
+
+        // 5. Start the countdown
+        activeTimers[timerKey] = setTimeout(async () => {
+            console.log(`Timer expired! Turning off ${deviceId} switch ${switchId}`);
+
+            // Re-fetch to get current inversion status in case it changed during the timer
+            const deviceAtExpiry = await Device.findOne({ deviceId });
+            const swAtExpiry = deviceAtExpiry ? deviceAtExpiry.switches.find(s => s.id === switchId) : null;
+
+            // 6. Turn OFF Logic (Apply Inversion Logic)
+            // If inverted, logical OFF = hardware true (1)
+            const endSignal = (swAtExpiry && swAtExpiry.inverted) ? true : false;
+            const offPayload = JSON.stringify({ switchId, state: endSignal });
+            mqttClient.publish(`devices/${deviceId}/command`, offPayload);
+
+            // 7. Update Database with logical OFF state
+            await Device.updateOne(
+                { deviceId: deviceId, "switches.id": switchId },
+                {
+                    $set: {
+                        "switches.$.state": false,
+                        "switches.$.lastOnTime": null,
+                        "switches.$.timerExpiresAt": null
+                    }
+                }
+            );
+
+            // 8. Log "Turned OFF" History
+            if (deviceAtExpiry) {
+                await History.create({
+                    owner: deviceAtExpiry.owner,
+                    deviceId: deviceId,
+                    switchName: swAtExpiry ? swAtExpiry.name : `Switch ${switchId}`,
+                    action: "Turned OFF (Timer)",
+                    timestamp: new Date()
+                });
+            }
+            if (deviceAtExpiry && deviceAtExpiry.owner) {
+                const ownerRecord = await User.findById(deviceAtExpiry.owner).lean();
+                if (ownerRecord && ownerRecord.isGoogleLinked === true) {
+                    try {
+                        await reportStateToGoogle(
+                            deviceAtExpiry.owner.toString(),
+                            { [`${deviceId}-${switchId}`]: { on: false, online: true } }
+                        );
+                    } catch (error) {
+                        // Self-Healing for Timers
+                        const status = error?.response?.status || error?.status;
+                        if (status === 404) {
+                            console.warn(`⚠️ User ${deviceAtExpiry.owner} unlinked from Google during timer. Disabling reporting.`);
+                            await User.findByIdAndUpdate(deviceAtExpiry.owner, { isGoogleLinked: false });
+                        }
+                    }
+                }
+            }
+
+            delete activeTimers[timerKey];
+        }, minutes * 60 * 1000);
+
+        res.json({ status: 'timer_set', minutes });
+
+    } catch (err) {
+        console.error("Timer Error:", err);
+        res.status(500).json({ error: "Server Error" });
     }
-      
-      delete activeTimers[timerKey];
-    }, minutes * 60 * 1000);
-
-    res.json({ status: 'timer_set', minutes });
-
-  } catch (err) {
-    console.error("Timer Error:", err);
-    res.status(500).json({ error: "Server Error" });
-  }
 });
 
 
 // [NEW] Cancel Timer Endpoint
 app.post('/api/timer/cancel', auth, async (req, res) => {
-  const { deviceId, switchId } = req.body;
-  const timerKey = `${deviceId}-${switchId}`;
+    const { deviceId, switchId } = req.body;
+    const timerKey = `${deviceId}-${switchId}`;
 
-  try {
-    // 1. Stop the Node.js Timeout
-    if (activeTimers[timerKey]) {
-      clearTimeout(activeTimers[timerKey]);
-      delete activeTimers[timerKey];
+    try {
+        // 1. Stop the Node.js Timeout
+        if (activeTimers[timerKey]) {
+            clearTimeout(activeTimers[timerKey]);
+            delete activeTimers[timerKey];
+        }
+
+        // BUG 11 FIX: Turn off the physical switch when timer is cancelled,
+        // not just clear the DB field. Previously the switch stayed ON.
+        const device = await Device.findOne({ deviceId, owner: req.user.id });
+        if (device) {
+            const sw = device.switches.find(s => s.id === switchId);
+            // Apply inversion logic for the OFF signal
+            const endSignal = (sw && sw.inverted) ? true : false;
+            mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: endSignal }));
+        }
+
+        // 2. Update DB: set state OFF, clear timer fields
+        await Device.updateOne(
+            { deviceId: deviceId, "switches.id": switchId },
+            { $set: { "switches.$.state": false, "switches.$.lastOnTime": null, "switches.$.timerExpiresAt": null } }
+        );
+
+        res.json({ status: 'timer_cancelled' });
+
+    } catch (err) {
+        console.error("Timer Cancel Error:", err);
+        res.status(500).json({ error: "Server Error" });
     }
-
-    // 2. Remove Timer Data from DB
-    await Device.updateOne(
-      { deviceId: deviceId, "switches.id": switchId },
-      { $set: { "switches.$.timerExpiresAt": null } }
-    );
-
-    res.json({ status: 'timer_cancelled' });
-
-  } catch (err) {
-    console.error("Timer Cancel Error:", err);
-    res.status(500).json({ error: "Server Error" });
-  }
 });
 
 
 // Wi-Fi Config Update
 
+// BUG 7 FIX: Wrapped in try/catch so a DB error doesn't hang the request
 app.post('/api/wifi-config', auth, async (req, res) => {
-  const { deviceId, ssid, pass } = req.body;
+    const { deviceId, ssid, pass } = req.body;
+    try {
+        // Verify Device Ownership (Security Check)
+        // We check if the device belongs to the user logged in (req.user.id)
+        const device = await Device.findOne({ deviceId, owner: req.user.id });
 
-  // Verify Device Ownership (Security Check)
-  // We check if the device belongs to the user logged in (req.user.id)
-  const device = await Device.findOne({ deviceId, owner: req.user.id });
-  
-  if (!device) {
-      return res.status(404).json({ error: "Device not found or access denied" });
-  }
+        if (!device) {
+            return res.status(404).json({ error: "Device not found or access denied" });
+        }
 
-  // Publish to MQTT
-  const payload = JSON.stringify({ ssid, pass });
-  mqttClient.publish(`devices/${deviceId}/wifi`, payload);
+        // Publish to MQTT
+        const payload = JSON.stringify({ ssid, pass });
+        mqttClient.publish(`devices/${deviceId}/wifi`, payload);
 
-  console.log(`Sending new Wi-Fi creds to ${deviceId}`);
-  res.json({ status: 'sent' });
+        console.log(`Sending new Wi-Fi creds to ${deviceId}`);
+        res.json({ status: 'sent' });
+    } catch (err) {
+        console.error("Wi-Fi config error:", err);
+        res.status(500).json({ error: "Server Error" });
+    }
 });
 
 
 
-        // VERIFICATION APIs
+// VERIFICATION APIs
 
 // Verify User Password (For Wi-Fi Access)
 app.post('/api/verify-password', auth, async (req, res) => {
@@ -855,7 +877,7 @@ app.post('/api/verify-code', auth, async (req, res) => {
         // Check if ANY device owned by this user has this secret code
         // Note: You must ensure your Device model has a "secretCode" field in DB
         const device = await Device.findOne({ owner: req.user.id, secretCode: code });
-        
+
         if (!device) return res.status(400).json({ error: "Invalid Kit Code" });
 
         res.json({ status: 'ok' });
@@ -866,13 +888,13 @@ app.post('/api/verify-code', auth, async (req, res) => {
 
 // Get 24-Hour History
 app.get('/api/history', auth, async (req, res) => {
-  try {
-    // Fetch logs for this user, sorted by newest first
-    const logs = await History.find({ owner: req.user.id }).sort({ timestamp: -1 });
-    res.json(logs);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch history" });
-  }
+    try {
+        // Fetch logs for this user, sorted by newest first
+        const logs = await History.find({ owner: req.user.id }).sort({ timestamp: -1 });
+        res.json(logs);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch history" });
+    }
 });
 
 
@@ -903,11 +925,25 @@ app.get('/api/admin/devices', auth, verifyAdmin, async (req, res) => {
 
 // Create New Device (The Factory Process)
 // Create New Device (Factory Process)
-app.post('/api/admin/create', auth, verifyAdmin, async (req, res) => {
+app.post('/api/admin/create', auth, verifyAdmin, [
+    // SECURITY: Validate format to prevent garbage/injection being written to DB
+    body('deviceId')
+        .isString().trim()
+        .isLength({ min: 1, max: 64 })
+        .matches(/^[a-zA-Z0-9_-]+$/).withMessage('Device ID may only contain letters, numbers, hyphens, or underscores'),
+    body('secretCode')
+        .isString().trim()
+        .isLength({ min: 4, max: 32 }).withMessage('Secret code must be 4-32 characters'),
+    body('channels')
+        .optional().isInt({ min: 1, max: 9 }).toInt()
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+
     // [UPDATED] Accept channels from body (Default to 9 if not provided)
     const { deviceId, secretCode, channels } = req.body;
     const numSwitches = channels || 9; // Default max
-    
+
     try {
         const existing = await Device.findOne({ deviceId });
         if (existing) return res.status(400).json({ error: "Device ID already exists!" });
@@ -1005,13 +1041,17 @@ app.get('/auth', (req, res) => {
         return res.send("Error: Missing 'redirect_uri'. Do not open this page manually. Please start from the Google Home App.");
     }
 
+    // BUG 9 FIX: Encode user-controlled values before injecting into HTML to prevent XSS
+    const safeRedirectUri = redirect_uri.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const safeState = state.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
     res.send(`
     <html>
       <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
         <h2>Link Smart Home</h2>
         <form action="/login-link" method="post">
-          <input type="hidden" name="redirect_uri" value="${redirect_uri}" />
-          <input type="hidden" name="state" value="${state}" />
+          <input type="hidden" name="redirect_uri" value="${safeRedirectUri}" />
+          <input type="hidden" name="state" value="${safeState}" />
           <input type="email" name="email" placeholder="Email" required style="padding: 10px; margin: 5px;"/><br/>
           <input type="password" name="password" placeholder="Password" required style="padding: 10px; margin: 5px;"/><br/>
           <button type="submit" style="padding: 10px 20px; background: #3b82f6; color: white; border: none; margin-top: 10px;">Link Account</button>
@@ -1027,10 +1067,17 @@ app.post('/login-link', async (req, res) => {
     console.log("Login Attempt Body:", req.body);
 
     const { email, password, redirect_uri, state } = req.body;
-    
+
     // SAFETY CHECK: If redirect_uri is missing, stop here.
     if (!redirect_uri || redirect_uri === "undefined") {
         return res.send("Error: Return address lost. Please go back to Google Home App and try again.");
+    }
+
+    // BUG 9 FIX: Validate redirect_uri to prevent open redirect attacks.
+    // Only Google's official OAuth redirect domain is allowed.
+    const ALLOWED_REDIRECT_PREFIX = "https://oauth-redirect.googleusercontent.com";
+    if (!redirect_uri.startsWith(ALLOWED_REDIRECT_PREFIX)) {
+        return res.status(400).send("Error: Invalid redirect URI. This endpoint only accepts Google OAuth redirects.");
     }
 
     // Check credentials
@@ -1039,11 +1086,17 @@ app.post('/login-link', async (req, res) => {
         return res.send("Invalid credentials. Please go back and try again.");
     }
 
-    const authCode = Buffer.from(user._id.toString()).toString('base64');
-    
+    // SECURITY FIX (Issue 5): Sign auth code as a short-lived JWT instead of plain base64(userId).
+    // Plain base64 is trivially decodable — anyone with a MongoDB _id could forge a code.
+    const authCode = jwt.sign(
+        { uid: user._id.toString() },
+        process.env.JWT_SECRET,
+        { expiresIn: '5m' }   // Code valid for 5 minutes only
+    );
+
     // Redirect back to Google
     console.log(`Redirecting to: ${redirect_uri}`);
-    res.redirect(`${redirect_uri}?code=${authCode}&state=${state}`);
+    res.redirect(`${redirect_uri}?code=${encodeURIComponent(authCode)}&state=${state}`);
 });
 
 // OAUTH: Token Exchange
@@ -1051,25 +1104,48 @@ app.post('/login-link', async (req, res) => {
 app.post('/token', async (req, res) => {
     const { code, grant_type, refresh_token } = req.body;
     let userId;
-    
+
+    // BUG 10 FIX: Validate grant_type before proceeding
     // If getting a new token
     if (grant_type === 'authorization_code') {
-        userId = Buffer.from(code, 'base64').toString('ascii'); // Decode User ID
-    } 
+        // SECURITY FIX (Issue 5): Verify the signed JWT auth code instead of decoding plain base64
+        try {
+            const decoded = jwt.verify(code, process.env.JWT_SECRET);
+            userId = decoded.uid;
+        } catch (e) {
+            return res.status(400).json({ error: 'Invalid or expired authorization code' });
+        }
+    }
     // If refreshing an old token
     else if (grant_type === 'refresh_token') {
-        userId = refresh_token;
+        // SECURITY FIX (Issue 6): Verify that the refresh token is a signed JWT (not raw userId)
+        try {
+            const decoded = jwt.verify(refresh_token, process.env.JWT_SECRET);
+            userId = decoded.uid;
+        } catch (e) {
+            return res.status(400).json({ error: 'Invalid or expired refresh token' });
+        }
+    } else {
+        return res.status(400).json({ error: 'Invalid grant_type' });
+    }
+
+    // BUG 10 FIX: Guard against undefined userId before writing to DB or signing JWT
+    if (!userId) {
+        return res.status(400).json({ error: 'Invalid token request: missing user identifier' });
     }
 
     await User.findByIdAndUpdate(userId, { isGoogleLinked: true });
 
-    // Create a standard JWT for Google to use in future requests
-    const token = jwt.sign({ id: userId }, process.env.JWT_SECRET);
+    // BUG 1 FIX: Added expiresIn so Google tokens are not valid forever
+    const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    // SECURITY FIX (Issue 6): Refresh token is now a signed JWT with 30-day expiry (not raw userId)
+    const signedRefreshToken = jwt.sign({ uid: userId }, process.env.JWT_SECRET, { expiresIn: '30d' });
 
     res.json({
         token_type: "Bearer",
         access_token: token,
-        refresh_token: userId,
+        refresh_token: signedRefreshToken,
         expires_in: 3600 // 1 hour
     });
 });
@@ -1080,6 +1156,12 @@ app.post('/api/smarthome', auth, async (req, res) => {
     const body = req.body;
     const userId = req.user.id; // Extracted from the JWT token
     const requestId = body.requestId;
+
+    // BUG 2 FIX: Guard against missing or malformed inputs array to prevent crash
+    if (!body.inputs || !body.inputs[0]) {
+        return res.status(400).json({ error: "Bad Request: missing inputs" });
+    }
+
     const intent = body.inputs[0].intent;
 
     // Handle Disconnect ---
@@ -1094,12 +1176,12 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
     console.log(`Google Request: ${intent}`);
 
- //CHECK TOGGLE STATUS ---
+    //CHECK TOGGLE STATUS ---
     const user = await User.findById(userId);
-    
+
     // If user has disabled Google Home, we force devices to appear OFFLINE
     if (!user || user.googleHomeEnabled === false) {
-        
+
         // QUERY INTENT (Status Check) -> Report "Offline"
         if (intent === 'action.devices.QUERY') {
             const requestedDevices = body.inputs[0].payload.devices;
@@ -1115,7 +1197,7 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
         // EXECUTE INTENT (Turn On/Off) -> Block it
         if (intent === 'action.devices.EXECUTE') {
-             return res.json({
+            return res.json({
                 requestId: requestId,
                 payload: {
                     errorCode: "deviceOffline" // Tell Google device is unreachable
@@ -1130,7 +1212,7 @@ app.post('/api/smarthome', auth, async (req, res) => {
     // SYNC: Google asks "What devices does this user have?" 
     if (intent === 'action.devices.SYNC') {
         const devices = await Device.find({ owner: userId }).lean();
-        
+
         const payloadDevices = [];
         devices.forEach(device => {
             device.switches.forEach(sw => {
@@ -1170,106 +1252,112 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
     // QUERY: Google asks "Is the light on?" 
     if (intent === 'action.devices.QUERY') {
-    const requestedDevices = body.inputs[0].payload.devices;
-    const deviceStatus = {};
+        const requestedDevices = body.inputs[0].payload.devices;
+        const deviceStatus = {};
 
-    // Group switches by deviceId to minimize DB hits
-    const uniqueDeviceIds = [...new Set(requestedDevices.map(d => d.id.split('-')[0]))];
-    
-    // Fetch all relevant devices in one go
-    const devices = await Device.find({ deviceId: { $in: uniqueDeviceIds }, owner: userId }).lean();
-    const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
+        // Group switches by deviceId to minimize DB hits
+        const uniqueDeviceIds = [...new Set(requestedDevices.map(d => d.id.split('-')[0]))];
 
-    for (const d of requestedDevices) {
-        const [deviceId, switchIdStr] = d.id.split('-');
-        const switchId = parseInt(switchIdStr);
-        const dbDevice = deviceMap[deviceId];
+        // Fetch all relevant devices in one go
+        const devices = await Device.find({ deviceId: { $in: uniqueDeviceIds }, owner: userId }).lean();
+        const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
 
-        if (dbDevice) {
-            const sw = dbDevice.switches.find(s => s.id === switchId);
-            deviceStatus[d.id] = {
-                on: sw ? sw.state : false,
-                online: dbDevice.isOnline
-            };
-        } else {
-            deviceStatus[d.id] = { online: false };
-        }
-    }
-
-    return res.json({
-        requestId: requestId,
-        payload: { devices: deviceStatus }
-    });
-}
-
-    // EXECUTE: Google says "Turn on the light"
-if (intent === 'action.devices.EXECUTE') {
-    const commands = body.inputs[0].payload.commands;
-    
-    // 1. Identify all unique device IDs involved in this request
-    const allDeviceIds = commands.flatMap(c => c.devices.map(d => d.id.split('-')[0]));
-    const uniqueIds = [...new Set(allDeviceIds)];
-
-    // 2. Fetch all devices once and create a map
-    const devices = await Device.find({ deviceId: { $in: uniqueIds }, owner: userId }).lean();
-    const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
-
-    const commandResults = await Promise.all(commands.map(async (command) => {
-        return await Promise.all(command.devices.map(async (device) => {
-            const [deviceId, switchIdStr] = device.id.split('-');
+        for (const d of requestedDevices) {
+            const [deviceId, switchIdStr] = d.id.split('-');
             const switchId = parseInt(switchIdStr);
             const dbDevice = deviceMap[deviceId];
 
-            if (!dbDevice) return { ids: [device.id], status: "OFFLINE" };
+            if (dbDevice) {
+                const sw = dbDevice.switches.find(s => s.id === switchId);
+                deviceStatus[d.id] = {
+                    on: sw ? sw.state : false,
+                    online: dbDevice.isOnline
+                };
+            } else {
+                deviceStatus[d.id] = { online: false };
+            }
+        }
 
-            return await Promise.all(command.execution.map(async (execution) => {
-                if (execution.command === 'action.devices.commands.OnOff') {
-                    const newState = execution.params.on;
-                    const sw = dbDevice.switches.find(s => s.id === switchId);
-                    
-                    const hardwareSignal = (sw && sw.inverted) ? !newState : newState;
-                    mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
+        return res.json({
+            requestId: requestId,
+            payload: { devices: deviceStatus }
+        });
+    }
 
-                    // Prepare update fields to include timestamp
-                    let updateFields = { "switches.$.state": newState };
-                    if (newState) {
-                        updateFields["switches.$.lastOnTime"] = new Date();
-                    } else {
-                        updateFields["switches.$.lastOnTime"] = null;
-                        updateFields["switches.$.timerExpiresAt"] = null;
-                    }
+    // EXECUTE: Google says "Turn on the light"
+    if (intent === 'action.devices.EXECUTE') {
+        // SECURITY FIX (Issue 4): Wrap in try/catch to prevent unhandled rejection hanging the response
+        try {
+            const commands = body.inputs[0].payload.commands;
 
-                    await Device.updateOne(
-                        { deviceId, "switches.id": switchId },
-                        { $set: updateFields } // Now updates both state and timestamp
-                    );
+            // 1. Identify all unique device IDs involved in this request
+            const allDeviceIds = commands.flatMap(c => c.devices.map(d => d.id.split('-')[0]));
+            const uniqueIds = [...new Set(allDeviceIds)];
 
-                    // Log History in background
-                    History.create({
-                        owner: userId,
-                        deviceId: deviceId,
-                        switchName: sw ? sw.name : `Switch ${switchId}`,
-                        action: newState ? "Turned ON (Google)" : "Turned OFF (Google)"
-                    }).catch(e => console.error("History Error", e));
+            // 2. Fetch all devices once and create a map
+            const devices = await Device.find({ deviceId: { $in: uniqueIds }, owner: userId }).lean();
+            const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
 
-                    return {
-                        ids: [device.id],
-                        status: "SUCCESS",
-                        states: { on: newState, online: true }
-                    };
-                }
+            const commandResults = await Promise.all(commands.map(async (command) => {
+                return await Promise.all(command.devices.map(async (device) => {
+                    const [deviceId, switchIdStr] = device.id.split('-');
+                    const switchId = parseInt(switchIdStr);
+                    const dbDevice = deviceMap[deviceId];
+
+                    if (!dbDevice) return { ids: [device.id], status: "OFFLINE" };
+
+                    return await Promise.all(command.execution.map(async (execution) => {
+                        if (execution.command === 'action.devices.commands.OnOff') {
+                            const newState = execution.params.on;
+                            const sw = dbDevice.switches.find(s => s.id === switchId);
+
+                            const hardwareSignal = (sw && sw.inverted) ? !newState : newState;
+                            mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
+
+                            // Prepare update fields to include timestamp
+                            let updateFields = { "switches.$.state": newState };
+                            if (newState) {
+                                updateFields["switches.$.lastOnTime"] = new Date();
+                            } else {
+                                updateFields["switches.$.lastOnTime"] = null;
+                                updateFields["switches.$.timerExpiresAt"] = null;
+                            }
+
+                            await Device.updateOne(
+                                { deviceId, "switches.id": switchId },
+                                { $set: updateFields }
+                            );
+
+                            // Log History in background
+                            History.create({
+                                owner: userId,
+                                deviceId: deviceId,
+                                switchName: sw ? sw.name : `Switch ${switchId}`,
+                                action: newState ? "Turned ON (Google)" : "Turned OFF (Google)"
+                            }).catch(e => console.error("History Error", e));
+
+                            return {
+                                ids: [device.id],
+                                status: "SUCCESS",
+                                states: { on: newState, online: true }
+                            };
+                        }
+                    }));
+                }));
             }));
-        }));
-    }));
 
-    return res.json({
-        requestId: requestId,
-        payload: { commands: commandResults.flat(2) }
-    });
-}
+            return res.json({
+                requestId: requestId,
+                payload: { commands: commandResults.flat(2) }
+            });
+        } catch (err) {
+            console.error('[EXECUTE ERROR]', err.message);
+            return res.status(500).json({ requestId, payload: { errorCode: 'hardError' } });
+        }
+    }
 });
 
 // Start Server
-app.listen(PORT, '0.0.0.0', () => { 
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Backend server running at http://localhost:${PORT}`);
 });

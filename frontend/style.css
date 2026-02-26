@@ -247,31 +247,24 @@ header h2 { font-size: 1.75rem; font-weight: 700; color: var(--text-main-light);
     flex-shrink: 0;
 }
 
-/* --- Find this section in your CSS --- */
+/* Devices Grid — responsive auto-fill: fits as many cards as screen allows */
 .device-grid {
     display: grid;
-    /* Change repeat(2, 1fr) to this: */
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 1rem;
     height: auto;
-    overflow-y: auto;  
-    padding-bottom: 160px;  
+    overflow-y: auto;
+    padding-bottom: 160px;
     -ms-overflow-style: none;
     scrollbar-width: none;
 }
 
-/* Optional: Hide scrollbar */
+/* Hide scrollbar */
 .device-grid::-webkit-scrollbar {
     display: none;
 }
 
-/* Media queries */
-@media (min-width: 768px) { 
-    .device-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } 
-}
-@media (min-width: 1024px) { 
-    .device-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } 
-}
+/* No hard breakpoints needed — auto-fill handles all screen widths naturally */
 
 /* --- 6. DEVICE CARD COMPONENT --- */
 .device-card {
