@@ -863,11 +863,30 @@ function renderGrid(devices) {
                     <div class="card-header">
                         <div class="device-icon"><i class="fa-solid ${iconClass}"></i><div class="spinner"></div></div>
                     </div>
+                    ${dbType === 'fan' ? `<div class="speed-dots" data-did="${device.deviceId}" data-sid="${sw.id}">
+                        <button class="speed-dot" data-speed="1" title="Low"></button>
+                        <button class="speed-dot" data-speed="2" title="Medium"></button>
+                        <button class="speed-dot" data-speed="3" title="High"></button>
+                        <button class="speed-dot" data-speed="4" title="Turbo"></button>
+                    </div>` : ''}
                     <div class="card-footer">
                         <div class="footer-left"><div class="device-name">${sw.name}</div><div class="device-status">OFF</div></div>
                         <div class="footer-right"><div class="runtime-display"></div><div class="timer-display"></div></div>
                     </div>`;
                 grid.appendChild(card);
+
+                // Attach speed-dot click handlers once on card creation
+                if (dbType === 'fan') {
+                    card.querySelectorAll('.speed-dot').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const speed = parseInt(btn.dataset.speed);
+                            const did = btn.closest('.speed-dots').dataset.did;
+                            const sid = parseInt(btn.closest('.speed-dots').dataset.sid);
+                            setFanSpeed(did, sid, speed, card);
+                        });
+                    });
+                }
             }
 
             const overlay = card.querySelector('.offline-overlay');
@@ -925,6 +944,16 @@ function renderGrid(devices) {
                     statusText.innerText = isActive ? 'ON' : 'OFF';
                 }
             }
+            // FAN SPEED DOTS: Update active dot to reflect current speed
+            const speedDotsEl = card.querySelector('.speed-dots');
+            if (speedDotsEl) {
+                const currentSpeed = sw.speed || 0;
+                const fanOn = isOnline && sw.state;
+                speedDotsEl.style.display = fanOn ? 'flex' : 'none';
+                speedDotsEl.querySelectorAll('.speed-dot').forEach(btn => {
+                    btn.classList.toggle('active', parseInt(btn.dataset.speed) === currentSpeed);
+                });
+            }
         });
     });
 }
@@ -972,6 +1001,33 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
     }
 }
 
+// Set fan speed (1=Low, 2=Med, 3=High, 4=Turbo)
+async function setFanSpeed(deviceId, switchId, speed, cardElement) {
+    // Optimistically update dots immediately for instant feedback
+    const dots = cardElement ? cardElement.querySelectorAll('.speed-dot') : [];
+    dots.forEach(d => d.classList.toggle('active', parseInt(d.dataset.speed) === speed));
+
+    try {
+        const res = await fetch(`${API_URL}/fan-speed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            body: JSON.stringify({ deviceId, switchId, speed })
+        });
+        if (!res.ok) throw new Error('Failed');
+
+        // Ensure card shows ON state visually
+        if (cardElement) {
+            cardElement.classList.add('is-active');
+            const iconDiv = cardElement.querySelector('.device-icon');
+            const statusEl = cardElement.querySelector('.device-status');
+            if (iconDiv) iconDiv.className = 'device-icon icon-on';
+            if (statusEl) { statusEl.className = 'device-status text-on'; statusEl.innerText = 'ON'; }
+        }
+    } catch (err) {
+        showToast('Failed to set fan speed', 'error');
+        dots.forEach(d => d.classList.remove('active'));
+    }
+}
 function logout() {
     localStorage.removeItem('token');
     window.location.href = 'index.html';

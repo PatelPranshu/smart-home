@@ -112,21 +112,30 @@ mongoose.connection.on('error', err => {
 // Parses service account credentials from env var once at startup
 const serviceAccountKey = process.env.SMART_HOME_KEY_JSON ? JSON.parse(process.env.SMART_HOME_KEY_JSON) : null;
 
+// Cache the GoogleAuth client — reuse across all reportState calls instead of creating a new one each time
+let _cachedHomegraph = null;
+function getHomegraphClient() {
+    if (!_cachedHomegraph && serviceAccountKey) {
+        const auth = new google.auth.GoogleAuth({
+            credentials: serviceAccountKey,
+            scopes: ['https://www.googleapis.com/auth/homegraph']
+        });
+        _cachedHomegraph = google.homegraph({ version: 'v1', auth });
+    }
+    return _cachedHomegraph;
+}
+
 /**
  * Reports device state to Google Home Graph.
  * @param {string} agentUserId  - The user's MongoDB _id as a string
  * @param {object} states       - Map of { "deviceId-switchId": { on: bool, online: bool } }
  */
 async function reportStateToGoogle(agentUserId, states) {
-    if (!serviceAccountKey) {
+    const homegraph = getHomegraphClient();
+    if (!homegraph) {
         console.warn('reportStateToGoogle: No service account key configured, skipping.');
         return;
     }
-    const auth = new google.auth.GoogleAuth({
-        credentials: serviceAccountKey,
-        scopes: ['https://www.googleapis.com/auth/homegraph']
-    });
-    const homegraph = google.homegraph({ version: 'v1', auth });
     await homegraph.devices.reportStateAndNotification({
         requestBody: {
             agentUserId,
@@ -600,6 +609,10 @@ app.post('/api/control', auth, [
         } else {
             updateFields["switches.$.lastOnTime"] = null;
             updateFields["switches.$.timerExpiresAt"] = null;
+            // FAN SPEED: Reset speed to 0 when turned off
+            if (sw.type === 'fan') {
+                updateFields["switches.$.speed"] = 0;
+            }
         }
 
         await Device.updateOne(
@@ -649,6 +662,68 @@ app.post('/api/control', auth, [
     }
 });
 
+// Fan Speed Control
+app.post('/api/fan-speed', auth, [
+    body('deviceId').isString().trim().escape(),
+    body('switchId').isInt(),
+    body('speed').isInt({ min: 1, max: 4 })
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid Input' });
+
+    const { deviceId, switchId, speed } = req.body;
+
+    try {
+        const device = await Device.findOne({ deviceId, owner: req.user.id });
+        if (!device) return res.status(404).json({ error: 'Device not found' });
+
+        const sw = device.switches.find(s => s.id === switchId);
+        if (!sw) return res.status(404).json({ error: 'Switch not found' });
+        if (sw.type !== 'fan') return res.status(400).json({ error: 'Speed control is only for fan type switches' });
+
+        // Publish MQTT — ESP32 firmware handles the relay pattern for each speed
+        mqttClient.publish(`devices/${deviceId}/fan-speed`, JSON.stringify({ switchId, speed }));
+
+        // Update DB: set speed, ensure state=true, set lastOnTime if not set
+        const updateFields = {
+            "switches.$.speed": speed,
+            "switches.$.state": true  // Setting speed implicitly turns fan on
+        };
+        if (!sw.lastOnTime) updateFields["switches.$.lastOnTime"] = new Date();
+
+        await Device.updateOne(
+            { deviceId, "switches.id": switchId },
+            { $set: updateFields }
+        );
+
+        // Respond immediately
+        res.json({ status: 'sent', speed });
+
+        // Background: report new state to Google
+        (async () => {
+            try {
+                const user = await User.findById(req.user.id).lean();
+                if (user && user.isGoogleLinked === true) {
+                    const speedNames = ['', 'Low', 'Medium', 'High', 'Turbo'];
+                    await reportStateToGoogle(req.user.id, {
+                        [`${deviceId}-${switchId}`]: {
+                            on: true,
+                            online: true,
+                            currentFanSpeedSetting: speedNames[speed]
+                        }
+                    });
+                }
+            } catch (e) {
+                const status = e?.response?.status || e?.status;
+                if (status === 404) await User.findByIdAndUpdate(req.user.id, { isGoogleLinked: false });
+            }
+        })();
+
+    } catch (err) {
+        console.error(err);
+        if (!res.headersSent) res.status(500).json({ error: 'Server Error' });
+    }
+});
 // Edit Device (Name & Icon)
 app.post('/api/edit', auth, [
     body('deviceId').isString().trim(),
@@ -1213,26 +1288,46 @@ app.post('/api/smarthome', auth, async (req, res) => {
     if (intent === 'action.devices.SYNC') {
         const devices = await Device.find({ owner: userId }).lean();
 
+        // BUG FIX: Complete type-to-Google-trait mapping for all 8 device types
+        const typeMap = {
+            'light': { type: 'action.devices.types.LIGHT', attributes: {} },
+            'fan': { type: 'action.devices.types.FAN', attributes: { reversible: false } },
+            'ac': { type: 'action.devices.types.AC_UNIT', attributes: {} },
+            'outlet': { type: 'action.devices.types.OUTLET', attributes: {} },
+            'wifi': { type: 'action.devices.types.ROUTER', attributes: {} },
+            'water': { type: 'action.devices.types.VALVE', attributes: {} },
+            'laundry': { type: 'action.devices.types.WASHER', attributes: {} },
+            'other': { type: 'action.devices.types.SWITCH', attributes: {} },
+        };
+
         const payloadDevices = [];
         devices.forEach(device => {
             device.switches.forEach(sw => {
-                // Determine Google Device Type
-                let type = 'action.devices.types.SWITCH';
-                if (sw.type === 'light') type = 'action.devices.types.LIGHT';
-                if (sw.type === 'fan') type = 'action.devices.types.FAN';
-                if (sw.type === 'ac') type = 'action.devices.types.AC_UNIT';
-                if (sw.type === 'outlet') type = 'action.devices.types.OUTLET';
+                const mapping = typeMap[sw.type] || typeMap['other'];
+
+                const isFan = sw.type === 'fan';
+                const fanSpeedAttribute = isFan ? {
+                    availableFanSpeeds: {
+                        speeds: [
+                            { speed_name: 'Low', speed_values: [{ speed_synonym: ['low', '1'], lang: 'en' }] },
+                            { speed_name: 'Medium', speed_values: [{ speed_synonym: ['medium', '2', 'mid'], lang: 'en' }] },
+                            { speed_name: 'High', speed_values: [{ speed_synonym: ['high', '3'], lang: 'en' }] },
+                            { speed_name: 'Turbo', speed_values: [{ speed_synonym: ['turbo', '4', 'max'], lang: 'en' }] }
+                        ],
+                        ordered: true
+                    },
+                    reversible: false
+                } : mapping.attributes;
 
                 payloadDevices.push({
-                    id: `${device.deviceId}-${sw.id}`, // e.g. "esp32_001-0"
-                    type: type,
-                    traits: [
-                        'action.devices.traits.OnOff' // All your devices support On/Off
-                    ],
-                    name: {
-                        name: sw.name
-                    },
+                    id: `${device.deviceId}-${sw.id}`,
+                    type: mapping.type,
+                    traits: isFan
+                        ? ['action.devices.traits.OnOff', 'action.devices.traits.FanSpeed']
+                        : ['action.devices.traits.OnOff'],
+                    name: { name: sw.name },
                     willReportState: true,
+                    attributes: fanSpeedAttribute,
                     deviceInfo: {
                         manufacturer: 'SmartHubPranshu',
                         model: 'ESP32'
@@ -1269,12 +1364,19 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
             if (dbDevice) {
                 const sw = dbDevice.switches.find(s => s.id === switchId);
-                deviceStatus[d.id] = {
+                const state = {
+                    status: 'SUCCESS',
                     on: sw ? sw.state : false,
                     online: dbDevice.isOnline
                 };
+                // Include fan speed in QUERY response
+                if (sw && sw.type === 'fan') {
+                    const speedNames = ['', 'Low', 'Medium', 'High', 'Turbo'];
+                    state.currentFanSpeedSetting = speedNames[sw.speed || 0] || 'Low';
+                }
+                deviceStatus[d.id] = state;
             } else {
-                deviceStatus[d.id] = { online: false };
+                deviceStatus[d.id] = { status: 'ERROR', errorCode: 'deviceNotFound', online: false };
             }
         }
 
@@ -1314,13 +1416,13 @@ app.post('/api/smarthome', auth, async (req, res) => {
                             const hardwareSignal = (sw && sw.inverted) ? !newState : newState;
                             mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
 
-                            // Prepare update fields to include timestamp
                             let updateFields = { "switches.$.state": newState };
                             if (newState) {
                                 updateFields["switches.$.lastOnTime"] = new Date();
                             } else {
                                 updateFields["switches.$.lastOnTime"] = null;
                                 updateFields["switches.$.timerExpiresAt"] = null;
+                                if (sw && sw.type === 'fan') updateFields["switches.$.speed"] = 0;
                             }
 
                             await Device.updateOne(
@@ -1328,7 +1430,6 @@ app.post('/api/smarthome', auth, async (req, res) => {
                                 { $set: updateFields }
                             );
 
-                            // Log History in background
                             History.create({
                                 owner: userId,
                                 deviceId: deviceId,
@@ -1342,13 +1443,35 @@ app.post('/api/smarthome', auth, async (req, res) => {
                                 states: { on: newState, online: true }
                             };
                         }
+
+                        // FAN SPEED: Handle "Hey Google, set fan to high"
+                        if (execution.command === 'action.devices.commands.SetFanSpeed') {
+                            const speedName = execution.params.fanSpeed;
+                            const speedMap = { 'Low': 1, 'Medium': 2, 'High': 3, 'Turbo': 4 };
+                            const speed = speedMap[speedName] || 1;
+
+                            mqttClient.publish(`devices/${deviceId}/fan-speed`, JSON.stringify({ switchId, speed }));
+
+                            await Device.updateOne(
+                                { deviceId, "switches.id": switchId },
+                                { $set: { "switches.$.speed": speed, "switches.$.state": true } }
+                            );
+
+                            return {
+                                ids: [device.id],
+                                status: "SUCCESS",
+                                states: { on: true, online: true, currentFanSpeedSetting: speedName }
+                            };
+                        }
                     }));
                 }));
             }));
 
+            // BUG FIX: flat(Infinity) instead of flat(2) — nested Promise.all produced
+            // extra nesting levels. Also filter out undefined from unhandled command types.
             return res.json({
                 requestId: requestId,
-                payload: { commands: commandResults.flat(2) }
+                payload: { commands: commandResults.flat(Infinity).filter(Boolean) }
             });
         } catch (err) {
             console.error('[EXECUTE ERROR]', err.message);
