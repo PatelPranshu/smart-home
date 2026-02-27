@@ -349,11 +349,14 @@ const auth = async (req, res, next) => {
             return res.status(401).send("User not found");
         }
 
-        // If the token doesn't have a version but the user does and it's > 0, or versions don't match, reject
-        const tokenVersion = verified.tokenVersion || 0;
-        if (user.tokenVersion !== tokenVersion) {
-            console.log("Auth Failed: Token version mismatch (logged out from all devices)");
-            return res.status(401).send("Session expired. Please log in again.");
+        // Only enforce tokenVersion for app tokens.
+        // Google Home access tokens are signed without tokenVersion — skipping the check
+        // for those prevents Google Home from permanently breaking after a "Logout All Devices".
+        if (verified.tokenVersion !== undefined) {
+            if (user.tokenVersion !== verified.tokenVersion) {
+                console.log("Auth Failed: Token version mismatch (logged out from all devices)");
+                return res.status(401).send("Session expired. Please log in again.");
+            }
         }
 
         req.user = verified;
@@ -1314,16 +1317,20 @@ app.post('/api/smarthome', auth, async (req, res) => {
     if (intent === 'action.devices.SYNC') {
         const devices = await Device.find({ owner: userId }).lean();
 
-        // BUG FIX: Complete type-to-Google-trait mapping for all 8 device types
+        // Google Home only supports 3 device types in this system: light, fan, outlet.
+        // Any other type the user selected (wifi, ac, water, laundry, other) is reported
+        // to Google Home as an OUTLET so it behaves correctly without errors.
+        // The app still stores and displays the original user-chosen type.
         const typeMap = {
             'light': { type: 'action.devices.types.LIGHT', attributes: {} },
             'fan': { type: 'action.devices.types.FAN', attributes: { reversible: false } },
-            'ac': { type: 'action.devices.types.AC_UNIT', attributes: {} },
             'outlet': { type: 'action.devices.types.OUTLET', attributes: {} },
-            'wifi': { type: 'action.devices.types.ROUTER', attributes: {} },
-            'water': { type: 'action.devices.types.VALVE', attributes: {} },
-            'laundry': { type: 'action.devices.types.WASHER', attributes: {} },
-            'other': { type: 'action.devices.types.SWITCH', attributes: {} },
+            // All non-standard types fall back to OUTLET for Google Home compatibility
+            'ac': { type: 'action.devices.types.OUTLET', attributes: {} },
+            'wifi': { type: 'action.devices.types.OUTLET', attributes: {} },
+            'water': { type: 'action.devices.types.OUTLET', attributes: {} },
+            'laundry': { type: 'action.devices.types.OUTLET', attributes: {} },
+            'other': { type: 'action.devices.types.OUTLET', attributes: {} },
         };
 
         const payloadDevices = [];
@@ -1398,7 +1405,9 @@ app.post('/api/smarthome', auth, async (req, res) => {
                 // Include fan speed in QUERY response
                 if (sw && sw.type === 'fan') {
                     const speedNames = ['', 'Low', 'Medium', 'High', 'Turbo'];
-                    state.currentFanSpeedSetting = speedNames[sw.speed || 0] || 'Low';
+                    // Use the stored speed index directly; fall back to 'Low' only when the value is
+                    // out-of-range (not when speed is legitimately 0 / fan is off).
+                    state.currentFanSpeedSetting = speedNames[sw.speed] || 'Low';
                 }
                 deviceStatus[d.id] = state;
             } else {
@@ -1482,6 +1491,14 @@ app.post('/api/smarthome', auth, async (req, res) => {
                                 { deviceId, "switches.id": switchId },
                                 { $set: { "switches.$.speed": speed, "switches.$.state": true } }
                             );
+
+                            const sw = dbDevice.switches.find(s => s.id === switchId);
+                            History.create({
+                                owner: userId,
+                                deviceId: deviceId,
+                                switchName: sw ? sw.name : `Switch ${switchId}`,
+                                action: `Set fan to ${speedName} (Google)`
+                            }).catch(e => console.error("History Error", e));
 
                             return {
                                 ids: [device.id],
