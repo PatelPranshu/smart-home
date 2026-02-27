@@ -616,55 +616,47 @@ app.post('/api/control', auth, [
     const { deviceId, switchId, state } = req.body;
 
     try {
-        const device = await Device.findOne({ deviceId, owner: req.user.id });
+        const device = await Device.findOne({ deviceId, owner: req.user.id }).lean();
         if (!device) return res.status(404).json({ error: "Device not found" });
 
-        // MQTT Publish
         const sw = device.switches.find(s => s.id === switchId);
 
-        // BUG 4 FIX: Guard against undefined switch before reading sw.inverted
+        // Guard against undefined switch before reading sw.inverted
         if (!sw) return res.status(404).json({ error: "Switch not found" });
 
         // INVERSION LOGIC: If inverted, send the opposite signal to the relay
         const hardwareSignal = sw.inverted ? !state : state;
-        const payload = JSON.stringify({ switchId, state: hardwareSignal });
+        mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
 
-        mqttClient.publish(`devices/${deviceId}/command`, payload);
-
-        // Update Database
-        let updateFields = { "switches.$.state": state };
-        if (state) {
-            updateFields["switches.$.lastOnTime"] = new Date();
-        } else {
-            updateFields["switches.$.lastOnTime"] = null;
-            updateFields["switches.$.timerExpiresAt"] = null;
-            // FAN SPEED: Reset speed to 0 when turned off
-            if (sw.type === 'fan') {
-                updateFields["switches.$.speed"] = 0;
-            }
-        }
-
-        await Device.updateOne(
-            { deviceId: deviceId, "switches.id": switchId },
-            { $set: updateFields }
-        );
-
-        // SPEED UPDATE: Respond to user NOW
+        // ✅ Respond to client immediately — MQTT command is already sent
         res.json({ status: 'sent', state });
 
-        // Background Tasks (Runs AFTER response is sent)
+        // Background Tasks: DB update + history + Google report (all run after response)
         (async () => {
             try {
-                // Task A: Log History
-                const sw = device.switches.find(s => s.id === switchId);
+                // Task A: Update Database
+                let updateFields = { "switches.$.state": state };
+                if (state) {
+                    updateFields["switches.$.lastOnTime"] = new Date();
+                } else {
+                    updateFields["switches.$.lastOnTime"] = null;
+                    updateFields["switches.$.timerExpiresAt"] = null;
+                    if (sw.type === 'fan') updateFields["switches.$.speed"] = 0;
+                }
+                await Device.updateOne(
+                    { deviceId: deviceId, "switches.id": switchId },
+                    { $set: updateFields }
+                );
+
+                // Task B: Log History
                 await History.create({
                     owner: req.user.id,
                     deviceId: deviceId,
-                    switchName: sw ? sw.name : `Switch ${switchId}`,
+                    switchName: sw.name || `Switch ${switchId}`,
                     action: state ? "Turned ON (App)" : "Turned OFF (App)"
                 });
 
-                // Report to Google (The Slow Part)
+                // Task C: Report to Google
                 try {
                     const user = await User.findById(req.user.id).lean();
                     if (user && user.isGoogleLinked === true) {
@@ -686,7 +678,6 @@ app.post('/api/control', auth, [
 
     } catch (err) {
         console.error(err);
-        // Only send error if we haven't responded yet
         if (!res.headersSent) res.status(500).json({ error: "Server Error" });
     }
 });
