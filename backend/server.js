@@ -1426,98 +1426,115 @@ app.post('/api/smarthome', auth, async (req, res) => {
             const devices = await Device.find({ deviceId: { $in: uniqueIds }, owner: userId }).lean();
             const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
 
-            const commandResults = await Promise.all(commands.map(async (command) => {
-                return await Promise.all(command.devices.map(async (device) => {
+            // --- Build results and collect background work in parallel ---
+            // We resolve the intended state immediately from the request params and respond
+            // to Google right away. DB writes, history logs, and reportStateToGoogle all
+            // happen in a single fire-and-forget background task so Google is never waiting
+            // for a DB round-trip.
+            const commandResults = [];
+            const backgroundJobs = []; // Collect all DB/reporting work
+
+            for (const command of commands) {
+                for (const device of command.devices) {
                     const [deviceId, switchIdStr] = device.id.split('-');
                     const switchId = parseInt(switchIdStr);
                     const dbDevice = deviceMap[deviceId];
 
-                    if (!dbDevice) return { ids: [device.id], status: "OFFLINE" };
+                    if (!dbDevice) {
+                        commandResults.push({ ids: [device.id], status: "OFFLINE" });
+                        continue;
+                    }
 
-                    return await Promise.all(command.execution.map(async (execution) => {
+                    for (const execution of command.execution) {
+
+                        // --- OnOff ---
                         if (execution.command === 'action.devices.commands.OnOff') {
                             const newState = execution.params.on;
                             const sw = dbDevice.switches.find(s => s.id === switchId);
 
+                            // ✅ Publish MQTT immediately — hardware reacts now
                             const hardwareSignal = (sw && sw.inverted) ? !newState : newState;
                             mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
 
-                            let updateFields = { "switches.$.state": newState };
-                            if (newState) {
-                                updateFields["switches.$.lastOnTime"] = new Date();
-                            } else {
-                                updateFields["switches.$.lastOnTime"] = null;
-                                updateFields["switches.$.timerExpiresAt"] = null;
-                                if (sw && sw.type === 'fan') updateFields["switches.$.speed"] = 0;
-                            }
-
-                            await Device.updateOne(
-                                { deviceId, "switches.id": switchId },
-                                { $set: updateFields }
-                            );
-
-                            // Push confirmed state to Google Home Graph immediately
-                            // so the Test Suite 'Report State and Query discrepancy' check passes.
-                            reportStateToGoogle(userId, {
-                                [`${deviceId}-${switchId}`]: { on: newState, online: true }
-                            }).catch(e => console.error('[EXECUTE] reportState OnOff error:', e.message));
-
-                            History.create({
-                                owner: userId,
-                                deviceId: deviceId,
-                                switchName: sw ? sw.name : `Switch ${switchId}`,
-                                action: newState ? "Turned ON (Google)" : "Turned OFF (Google)"
-                            }).catch(e => console.error("History Error", e));
-
-                            return {
+                            // ✅ Build the SUCCESS response right away — no DB wait
+                            commandResults.push({
                                 ids: [device.id],
                                 status: "SUCCESS",
                                 states: { on: newState, online: true }
-                            };
+                            });
+
+                            // Queue DB update + history + reportState for background
+                            backgroundJobs.push(async () => {
+                                let updateFields = { "switches.$.state": newState };
+                                if (newState) {
+                                    updateFields["switches.$.lastOnTime"] = new Date();
+                                } else {
+                                    updateFields["switches.$.lastOnTime"] = null;
+                                    updateFields["switches.$.timerExpiresAt"] = null;
+                                    if (sw && sw.type === 'fan') updateFields["switches.$.speed"] = 0;
+                                }
+                                await Device.updateOne(
+                                    { deviceId, "switches.id": switchId },
+                                    { $set: updateFields }
+                                );
+                                reportStateToGoogle(userId, {
+                                    [`${deviceId}-${switchId}`]: { on: newState, online: true }
+                                }).catch(e => console.error('[EXECUTE] reportState OnOff error:', e.message));
+                                History.create({
+                                    owner: userId, deviceId,
+                                    switchName: sw ? sw.name : `Switch ${switchId}`,
+                                    action: newState ? "Turned ON (Google)" : "Turned OFF (Google)"
+                                }).catch(e => console.error("History Error", e));
+                            });
                         }
 
-                        // FAN SPEED: Handle "Hey Google, set fan to high"
-                        if (execution.command === 'action.devices.commands.SetFanSpeed') {
+                        // --- SetFanSpeed ---
+                        else if (execution.command === 'action.devices.commands.SetFanSpeed') {
                             const speedName = execution.params.fanSpeed;
                             const speedMap = { 'Low': 1, 'Medium': 2, 'High': 3, 'Turbo': 4 };
                             const speed = speedMap[speedName] || 1;
+                            const sw = dbDevice.switches.find(s => s.id === switchId);
 
+                            // ✅ Publish MQTT immediately
                             mqttClient.publish(`devices/${deviceId}/fan-speed`, JSON.stringify({ switchId, speed }));
 
-                            await Device.updateOne(
-                                { deviceId, "switches.id": switchId },
-                                { $set: { "switches.$.speed": speed, "switches.$.state": true } }
-                            );
-
-                            // Push confirmed fan speed state to Google Home Graph immediately.
-                            reportStateToGoogle(userId, {
-                                [`${deviceId}-${switchId}`]: { on: true, online: true, currentFanSpeedSetting: speedName }
-                            }).catch(e => console.error('[EXECUTE] reportState SetFanSpeed error:', e.message));
-
-                            const sw = dbDevice.switches.find(s => s.id === switchId);
-                            History.create({
-                                owner: userId,
-                                deviceId: deviceId,
-                                switchName: sw ? sw.name : `Switch ${switchId}`,
-                                action: `Set fan to ${speedName} (Google)`
-                            }).catch(e => console.error("History Error", e));
-
-                            return {
+                            // ✅ Build the SUCCESS response right away — no DB wait
+                            commandResults.push({
                                 ids: [device.id],
                                 status: "SUCCESS",
                                 states: { on: true, online: true, currentFanSpeedSetting: speedName }
-                            };
-                        }
-                    }));
-                }));
-            }));
+                            });
 
-            // BUG FIX: flat(Infinity) instead of flat(2) — nested Promise.all produced
-            // extra nesting levels. Also filter out undefined from unhandled command types.
-            return res.json({
+                            // Queue DB update + history + reportState for background
+                            backgroundJobs.push(async () => {
+                                await Device.updateOne(
+                                    { deviceId, "switches.id": switchId },
+                                    { $set: { "switches.$.speed": speed, "switches.$.state": true } }
+                                );
+                                reportStateToGoogle(userId, {
+                                    [`${deviceId}-${switchId}`]: { on: true, online: true, currentFanSpeedSetting: speedName }
+                                }).catch(e => console.error('[EXECUTE] reportState SetFanSpeed error:', e.message));
+                                History.create({
+                                    owner: userId, deviceId,
+                                    switchName: sw ? sw.name : `Switch ${switchId}`,
+                                    action: `Set fan to ${speedName} (Google)`
+                                }).catch(e => console.error("History Error", e));
+                            });
+                        }
+                    }
+                }
+            }
+
+            // ✅ Respond to Google immediately — hardware already reacted via MQTT
+            res.json({
                 requestId: requestId,
-                payload: { commands: commandResults.flat(Infinity).filter(Boolean) }
+                payload: { commands: commandResults.filter(Boolean) }
             });
+
+            // Run all background DB/reporting jobs after the response is sent
+            Promise.all(backgroundJobs.map(job => job())).catch(e =>
+                console.error('[EXECUTE BG ERROR]', e.message)
+            );
         } catch (err) {
             console.error('[EXECUTE ERROR]', err.message);
             return res.status(500).json({ requestId, payload: { errorCode: 'hardError' } });
