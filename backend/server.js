@@ -1465,6 +1465,12 @@ app.post('/api/smarthome', auth, async (req, res) => {
                                 { $set: updateFields }
                             );
 
+                            // Push confirmed state to Google Home Graph immediately
+                            // so the Test Suite 'Report State and Query discrepancy' check passes.
+                            reportStateToGoogle(userId, {
+                                [`${deviceId}-${switchId}`]: { on: newState, online: true }
+                            }).catch(e => console.error('[EXECUTE] reportState OnOff error:', e.message));
+
                             History.create({
                                 owner: userId,
                                 deviceId: deviceId,
@@ -1491,6 +1497,11 @@ app.post('/api/smarthome', auth, async (req, res) => {
                                 { deviceId, "switches.id": switchId },
                                 { $set: { "switches.$.speed": speed, "switches.$.state": true } }
                             );
+
+                            // Push confirmed fan speed state to Google Home Graph immediately.
+                            reportStateToGoogle(userId, {
+                                [`${deviceId}-${switchId}`]: { on: true, online: true, currentFanSpeedSetting: speedName }
+                            }).catch(e => console.error('[EXECUTE] reportState SetFanSpeed error:', e.message));
 
                             const sw = dbDevice.switches.find(s => s.id === switchId);
                             History.create({
