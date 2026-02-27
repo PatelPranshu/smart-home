@@ -145,6 +145,28 @@ async function reportStateToGoogle(agentUserId, states) {
     });
 }
 
+/**
+ * Asks Google to re-sync all devices for a user.
+ * Call this after a device is added, removed, or renamed so the Google Home
+ * app updates its device list without the user needing to say "sync my devices".
+ * @param {string} agentUserId - The user's MongoDB _id as a string
+ */
+async function requestSyncToGoogle(agentUserId) {
+    const homegraph = getHomegraphClient();
+    if (!homegraph) {
+        console.warn('requestSyncToGoogle: No service account key configured, skipping.');
+        return;
+    }
+    try {
+        await homegraph.devices.requestSync({
+            requestBody: { agentUserId: agentUserId.toString() }
+        });
+        console.log(`[SYNC] Requested Google sync for user ${agentUserId}`);
+    } catch (e) {
+        console.warn('[SYNC] requestSync failed (non-fatal):', e.message);
+    }
+}
+
 // Enable parsing form data for the login page
 app.use(express.urlencoded({ extended: true }));
 
@@ -571,6 +593,9 @@ app.post('/api/claim-device', auth, async (req, res) => {
         console.log(`User ${userId} claimed device ${deviceId}`);
         res.json({ status: 'success', message: 'Device successfully added to your account.' });
 
+        // Tell Google to refresh its device list so the new device appears immediately
+        requestSyncToGoogle(userId).catch(() => { });
+
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Server Error during claiming." });
@@ -597,6 +622,9 @@ app.post('/api/remove-device', auth, async (req, res) => {
 
         console.log(`User ${req.user.id} removed device ${deviceId}`);
         res.json({ status: 'removed' });
+
+        // Tell Google to refresh its device list so the removed device disappears
+        requestSyncToGoogle(req.user.id).catch(() => { });
 
     } catch (err) {
         console.error(err);
@@ -764,6 +792,9 @@ app.post('/api/edit', auth, [
 
         if (result.matchedCount === 0) return res.status(404).json({ error: "Device not found or access denied" });
         res.json({ status: 'updated' });
+
+        // Tell Google to refresh so renamed devices appear with their new name
+        requestSyncToGoogle(req.user.id).catch(() => { });
     } catch (err) { res.status(500).json({ error: "Update failed" }); }
 });
 
@@ -1208,7 +1239,8 @@ app.post('/token', async (req, res) => {
             const decoded = jwt.verify(code, process.env.JWT_SECRET);
             userId = decoded.uid;
         } catch (e) {
-            return res.status(400).json({ error: 'Invalid or expired authorization code' });
+            // Google requires exactly this error string to handle expired/invalid codes correctly
+            return res.status(400).json({ error: 'invalid_grant' });
         }
     }
     // If refreshing an old token
@@ -1218,7 +1250,8 @@ app.post('/token', async (req, res) => {
             const decoded = jwt.verify(refresh_token, process.env.JWT_SECRET);
             userId = decoded.uid;
         } catch (e) {
-            return res.status(400).json({ error: 'Invalid or expired refresh token' });
+            // Google requires exactly this error string to trigger a re-auth flow
+            return res.status(400).json({ error: 'invalid_grant' });
         }
     } else {
         return res.status(400).json({ error: 'Invalid grant_type' });
