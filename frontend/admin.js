@@ -1,6 +1,4 @@
-// const API_URL = 'http://localhost:3000/api';
-const API_URL = 'https://smart-home-04m4.onrender.com/api';
-
+// API_URL is now managed by apiConfig.js
 // SECURITY: Escape HTML special chars before injecting DB values into innerHTML
 function escapeHtml(str) {
     if (str == null) return '';
@@ -28,19 +26,7 @@ const PIN_MAP = [
 // 1. Get Token
 const token = localStorage.getItem('token');
 
-// GLOBAL FETCH INTERCEPTOR
-const originalFetch = window.fetch;
-window.fetch = async function () {
-    const response = await originalFetch.apply(this, arguments);
-    if (response.status === 401) {
-        localStorage.removeItem('token');
-        if (!window.location.pathname.endsWith('index.html') && window.location.pathname !== '/') {
-            window.location.href = 'index.html';
-        }
-    }
-    return response;
-};
-
+// GLOBAL FETCH INTERCEPTOR is now handled by app.js / apiConfig.js
 // 2. CHECK AUTH ON LOAD
 if (!token) {
     alert("You must log in as an Admin first.");

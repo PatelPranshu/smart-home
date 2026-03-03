@@ -3,25 +3,14 @@
 // ==========================================
 
 // Determine API URL (Localhost vs Render)
-// const API_URL = 'http://localhost:3000/api';
-const API_URL = 'https://smart-home-04m4.onrender.com/api';
+// API_URL is now managed by apiConfig.js
 
 // Global State
 const token = localStorage.getItem('token');
 const path = window.location.pathname;
 
 // GLOBAL FETCH INTERCEPTOR
-const originalFetch = window.fetch;
-window.fetch = async function () {
-    const response = await originalFetch.apply(this, arguments);
-    if (response.status === 401) {
-        localStorage.removeItem('token');
-        if (!window.location.pathname.endsWith('index.html') && window.location.pathname !== '/') {
-            window.location.href = 'index.html';
-        }
-    }
-    return response;
-};
+// Handled by apiConfig.js
 
 // ==========================================
 // 0. TOAST NOTIFICATION SYSTEM
