@@ -88,6 +88,7 @@ app.use((req, res, next) => {
 });
 
 
+
 app.use(mongoSanitize());
 
 // Database Connection
@@ -1573,6 +1574,11 @@ app.post('/api/smarthome', auth, async (req, res) => {
             return res.status(500).json({ requestId, payload: { errorCode: 'hardError' } });
         }
     }
+});
+
+// ── Health check ──
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Start Server
