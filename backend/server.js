@@ -1269,8 +1269,8 @@ app.get('/auth', (req, res) => {
         <h2>Blinkdrop Login</h2>
         <p class="subtitle">Use your Blinkdrop account</p>
         <form action="/login-link" method="post">
-          <input type="hidden" name="redirect_uri" value="\${safeRedirectUri}" />
-          <input type="hidden" name="state" value="\${safeState}" />
+          <input type="hidden" name="redirect_uri" value="${safeRedirectUri}" />
+          <input type="hidden" name="state" value="${safeState}" />
           
           <div class="input-group">
             <input type="email" name="email" placeholder="Email" required autocomplete="email" />
