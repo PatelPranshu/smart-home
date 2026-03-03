@@ -27,7 +27,7 @@ app.set('trust proxy', 1);
 
 //CORS HERE ---
 app.use(cors({
-    origin: [process.env.FRONTEND_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean),
+    origin: [process.env.FRONTEND_URL, process.env.ORIGIN_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
     credentials: true
@@ -181,11 +181,12 @@ const mqttClient = mqtt.connect(process.env.MQTT_URL, {
 });
 
 mqttClient.on('connect', () => {
-    console.log('Backend connected to MQTT Broker');
-    mqttClient.subscribe('devices/+/update'); // Listener for manual flips
-    mqttClient.subscribe('devices/+/sync');   // Listener for reboots
-    mqttClient.subscribe('devices/+/status'); // Listen for Online/Offline
-    mqttClient.subscribe('devices/+/sensor'); // Subscribe to sensor data
+    console.log('Backend connected to MQTT Broker (Failover Group)');
+    // Using '$share/backend/' prefix tells HiveMQ to balance messages between servers
+    mqttClient.subscribe('$share/backend/devices/+/update');
+    mqttClient.subscribe('$share/backend/devices/+/sync');
+    mqttClient.subscribe('$share/backend/devices/+/status');
+    mqttClient.subscribe('$share/backend/devices/+/sensor');
 });
 
 // Handle MQTT Messages
