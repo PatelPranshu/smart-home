@@ -1173,17 +1173,121 @@ app.get('/auth', (req, res) => {
     const safeState = state.replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
     res.send(`
-    <html>
-      <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-        <h2>Link Smart Home</h2>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Link Blinkdrop</title>
+      <style>
+        body {
+          margin: 0;
+          padding: 0;
+          background-color: #f8f9fa;
+          font-family: 'Roboto', Arial, sans-serif;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100vh;
+          color: #202124;
+        }
+        .card {
+          background: #ffffff;
+          border-radius: 8px;
+          border: 1px solid #dadce0;
+          padding: 40px 40px 36px;
+          width: 100%;
+          max-width: 450px;
+          box-sizing: border-box;
+          text-align: center;
+        }
+        .card h2 {
+          margin: 0 0 10px;
+          font-weight: 400;
+          font-size: 24px;
+        }
+        .card p.subtitle {
+          margin: 0 0 32px;
+          font-size: 16px;
+          color: #202124;
+        }
+        form {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .input-group {
+          text-align: left;
+          position: relative;
+        }
+        .input-group input {
+          width: 100%;
+          padding: 13px 15px;
+          border: 1px solid #dadce0;
+          border-radius: 4px;
+          font-size: 16px;
+          box-sizing: border-box;
+          transition: border-color 0.2s;
+        }
+        .input-group input:focus {
+          outline: none;
+          border: 2px solid #1a73e8;
+          padding: 12px 14px; /* Adjust padding to prevent layout shift */
+        }
+        .form-actions {
+          margin-top: 24px;
+          display: flex;
+          justify-content: flex-end;
+        }
+        button {
+          background-color: #1a73e8;
+          color: #ffffff;
+          border: none;
+          border-radius: 4px;
+          padding: 10px 24px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background-color 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+          background-color: #1b66c9;
+          box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
+        }
+        .disclaimer {
+          margin-top: 36px;
+          font-size: 14px;
+          color: #5f6368;
+          line-height: 1.5;
+          text-align: left;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h2>Blinkdrop Login</h2>
+        <p class="subtitle">Use your Blinkdrop account</p>
         <form action="/login-link" method="post">
-          <input type="hidden" name="redirect_uri" value="${safeRedirectUri}" />
-          <input type="hidden" name="state" value="${safeState}" />
-          <input type="email" name="email" placeholder="Email" required style="padding: 10px; margin: 5px;"/><br/>
-          <input type="password" name="password" placeholder="Password" required style="padding: 10px; margin: 5px;"/><br/>
-          <button type="submit" style="padding: 10px 20px; background: #3b82f6; color: white; border: none; margin-top: 10px;">Link Account</button>
+          <input type="hidden" name="redirect_uri" value="\${safeRedirectUri}" />
+          <input type="hidden" name="state" value="\${safeState}" />
+          
+          <div class="input-group">
+            <input type="email" name="email" placeholder="Email" required autocomplete="email" />
+          </div>
+          
+          <div class="input-group">
+            <input type="password" name="password" placeholder="Password" required autocomplete="current-password" />
+          </div>
+          
+          <div class="form-actions">
+            <button type="submit">Link Account</button>
+          </div>
         </form>
-      </body>
+        <div class="disclaimer">
+          By signing in, you are authorizing Google to access your devices and control them through the Google Home app and Google Assistant.
+        </div>
+      </div>
+    </body>
     </html>
     `);
 });
