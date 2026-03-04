@@ -140,6 +140,48 @@
                 </div>
             </div> -->
 
+            <div class="settings-group" style="margin-top: 25px;">
+                <h3 class="group-title">Server Settings</h3>
+
+                <div class="settings-card" style="padding: 15px; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div id="server-status-icon"
+                            style="width: 40px; height: 40px; background: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #16a34a; font-size: 1.2rem;">
+                            <i class="fa-solid fa-server"></i>
+                        </div>
+                        <div style="flex: 1; min-width: 0;">
+                            <span style="font-weight: 600; color: #333; font-size: 0.85rem;">Active Server</span>
+                            <div id="active-server-url"
+                                style="font-size: 0.75rem; color: #6b7280; margin-top: 2px; word-break: break-all;">
+                                Loading...</div>
+                        </div>
+                        <span id="server-status-badge" class="server-status-badge online">Connected</span>
+                    </div>
+                </div>
+
+                <div id="server-countdown-bar" class="server-countdown hidden">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span id="server-countdown-text">Server unreachable. Switching to automatic in 20s...</span>
+                </div>
+
+                <div class="settings-card" style="padding: 15px; margin-bottom: 10px;">
+                    <label
+                        style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:10px; color:#555;">Server
+                        Mode</label>
+                    <div class="server-mode-toggle">
+                        <button id="mode-auto-btn" class="mode-btn active" onclick="selectServerMode('auto')">
+                            <i class="fa-solid fa-arrows-rotate"></i> Automatic
+                        </button>
+                        <button id="mode-manual-btn" class="mode-btn" onclick="selectServerMode('manual')">
+                            <i class="fa-solid fa-hand-pointer"></i> Manual
+                        </button>
+                    </div>
+                </div>
+
+                <div id="manual-server-list" class="settings-card-list hidden" style="margin-top: 10px;">
+                </div>
+            </div>
+
             <button onclick="openLogoutModal()" class="btn-primary logout-btn" style="margin-bottom: 150px;">Log
                 Out</button>
         </div>

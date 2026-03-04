@@ -544,6 +544,163 @@ async function initSettings() {
         }
     };
 
+    // ==========================================
+    // SERVER SETTINGS LOGIC
+    // ==========================================
+
+    // --- Helper: Update active server display ---
+    function updateServerDisplay() {
+        const urlEl = document.getElementById('active-server-url');
+        const badgeEl = document.getElementById('server-status-badge');
+        const iconEl = document.getElementById('server-status-icon');
+
+        if (urlEl) {
+            // Show a cleaned-up URL
+            const cleanUrl = getActiveServer().replace('/api', '');
+            urlEl.textContent = cleanUrl;
+        }
+
+        // Async health check for the badge
+        checkServerHealth(getActiveServer()).then(isHealthy => {
+            if (badgeEl) {
+                badgeEl.textContent = isHealthy ? 'Connected' : 'Offline';
+                badgeEl.className = 'server-status-badge ' + (isHealthy ? 'online' : 'offline');
+            }
+            if (iconEl) {
+                iconEl.style.background = isHealthy ? '#dcfce7' : '#fee2e2';
+                iconEl.style.color = isHealthy ? '#16a34a' : '#ef4444';
+            }
+        });
+    }
+
+    // --- Helper: Render server list for manual mode ---
+    function renderServerList() {
+        const listEl = document.getElementById('manual-server-list');
+        if (!listEl) return;
+
+        const servers = getServers();
+        const activeServer = getActiveServer();
+
+        listEl.innerHTML = '';
+
+        servers.forEach((server, index) => {
+            const isSelected = server === activeServer;
+            const cleanUrl = server.replace('/api', '');
+            const label = `Server ${index + 1}`;
+
+            const item = document.createElement('div');
+            item.className = 'server-list-item' + (isSelected ? ' selected' : '');
+            item.innerHTML = `
+                <div>
+                    <div class="server-url">${cleanUrl}</div>
+                    <div class="server-label">${label}</div>
+                </div>
+                <div class="server-check"><i class="fa-solid fa-check"></i></div>
+            `;
+
+            item.onclick = () => {
+                if (server === getActiveServer()) return;
+                setManualServer(server);
+                renderServerList();
+                updateServerDisplay();
+                showToast(`Switched to ${label}`, 'success');
+            };
+
+            listEl.appendChild(item);
+        });
+    }
+
+    // --- Helper: Sync toggle buttons ---
+    function syncModeButtons(mode) {
+        const autoBtn = document.getElementById('mode-auto-btn');
+        const manualBtn = document.getElementById('mode-manual-btn');
+        const listEl = document.getElementById('manual-server-list');
+
+        if (autoBtn && manualBtn) {
+            autoBtn.classList.toggle('active', mode === 'auto');
+            manualBtn.classList.toggle('active', mode === 'manual');
+        }
+
+        if (listEl) {
+            if (mode === 'manual') {
+                listEl.classList.remove('hidden');
+                renderServerList();
+            } else {
+                listEl.classList.add('hidden');
+            }
+        }
+    }
+
+    // --- Mode toggle handler ---
+    window.selectServerMode = (mode) => {
+        setServerMode(mode);
+        syncModeButtons(mode);
+        updateServerDisplay();
+
+        // Hide countdown when switching to auto
+        const countdownBar = document.getElementById('server-countdown-bar');
+        if (countdownBar && mode === 'auto') {
+            countdownBar.classList.add('hidden');
+        }
+
+        if (mode === 'auto') {
+            showToast('Server mode: Automatic', 'success');
+        } else {
+            showToast('Server mode: Manual — select a server below', 'info');
+        }
+    };
+
+    // --- Listen for events from apiConfig.js ---
+    let countdownInterval = null;
+
+    window.addEventListener('serverModeChanged', (e) => {
+        syncModeButtons(e.detail.mode);
+        updateServerDisplay();
+
+        // If reverted to auto, hide countdown and notify user
+        if (e.detail.mode === 'auto') {
+            const countdownBar = document.getElementById('server-countdown-bar');
+            if (countdownBar) countdownBar.classList.add('hidden');
+            if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+            showToast('Auto-switched to Automatic mode (server was unreachable)', 'warning');
+        }
+    });
+
+    window.addEventListener('activeServerChanged', () => {
+        updateServerDisplay();
+        renderServerList();
+    });
+
+    window.addEventListener('manualRevertStarted', () => {
+        const countdownBar = document.getElementById('server-countdown-bar');
+        const countdownText = document.getElementById('server-countdown-text');
+        if (countdownBar) countdownBar.classList.remove('hidden');
+
+        // Animate countdown
+        let secondsLeft = 20;
+        if (countdownInterval) clearInterval(countdownInterval);
+        countdownInterval = setInterval(() => {
+            secondsLeft--;
+            if (countdownText) {
+                countdownText.textContent = `Server unreachable. Switching to automatic in ${secondsLeft}s...`;
+            }
+            if (secondsLeft <= 0) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+        }, 1000);
+    });
+
+    window.addEventListener('manualRevertCancelled', () => {
+        const countdownBar = document.getElementById('server-countdown-bar');
+        if (countdownBar) countdownBar.classList.add('hidden');
+        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    });
+
+    // --- Initialize server settings UI ---
+    syncModeButtons(getServerMode());
+    updateServerDisplay();
+
     window.closeModals = () => {
         document.querySelectorAll('.modal-overlay').forEach(el => el.classList.add('hidden'));
     };
