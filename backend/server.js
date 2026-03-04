@@ -27,7 +27,7 @@ app.set('trust proxy', 1);
 
 //CORS HERE ---
 app.use(cors({
-    origin: [process.env.FRONTEND_URL, process.env.ORIGIN_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean),
+    origin: "*", // Allow all origins (Change this in production to your frontend URL)
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
     credentials: true
