@@ -68,9 +68,12 @@ async function loadData() {
         const devices = await resDev.json();
         renderTable(devices);
 
+        // C. OTA: Firmware History + Device Versions
+        loadFirmwareHistory();
+        loadDeviceVersions();
+
     } catch (err) {
         console.error(err);
-        // alert("Connection Error to Backend"); 
     }
 }
 
@@ -478,4 +481,253 @@ function adminLogin() {
     } else {
         window.location.href = 'index.html';
     }
+}
+
+// ═══════════════════════════════════════════════════════
+// OTA FIRMWARE MANAGEMENT
+// ═══════════════════════════════════════════════════════
+
+// Cache device list for checklists
+let _allDevicesCache = [];
+
+function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+        + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
+// 14. FIRMWARE HISTORY
+async function loadFirmwareHistory() {
+    try {
+        const res = await fetch(`${API_URL}/admin/firmware`, {
+            headers: { 'x-access-token': token }
+        });
+        if (!res.ok) return;
+        const releases = await res.json();
+        renderFirmwareTable(releases);
+    } catch (err) {
+        console.error('[OTA] Failed to load firmware history', err);
+    }
+}
+
+function renderFirmwareTable(releases) {
+    const tbody = document.getElementById('firmware-table-body');
+    if (!tbody) return;
+
+    if (!releases.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">No firmware releases yet</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    releases.forEach(fw => {
+        const tr = document.createElement('tr');
+        const targetLabel = fw.targetType === 'all'
+            ? 'All Devices'
+            : `${fw.targetDevices.length} device(s)`;
+
+        const canRollback = (fw.status === 'active' || fw.status === 'rolled_back') && fw.localFilename;
+
+        tr.innerHTML = `
+            <td><span class="fw-version">v${escapeHtml(fw.version)}</span></td>
+            <td><span class="fw-badge ${escapeHtml(fw.status)}">${escapeHtml(fw.status.replace('_', ' '))}</span></td>
+            <td style="font-size:0.85rem; color:#6b7280;">${formatDate(fw.scheduledAt)}</td>
+            <td style="font-size:0.85rem; color:#6b7280;">${formatDate(fw.releasedAt)}</td>
+            <td style="font-size:0.85rem;">${targetLabel}</td>
+            <td style="text-align: right;">
+                ${canRollback
+                ? `<button class="btn-rollback" onclick="openRollbackModal('${fw._id}', '${escapeHtml(fw.version)}')" title="Rollback to this version">
+                        <i class="fa-solid fa-rotate-left"></i> Rollback
+                       </button>`
+                : '—'}
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// 15. DEVICE VERSION TRACKING
+async function loadDeviceVersions() {
+    try {
+        const res = await fetch(`${API_URL}/admin/device-versions`, {
+            headers: { 'x-access-token': token }
+        });
+        if (!res.ok) return;
+        const devices = await res.json();
+        _allDevicesCache = devices; // Cache for checklists
+        renderVersionTable(devices);
+    } catch (err) {
+        console.error('[OTA] Failed to load device versions', err);
+    }
+}
+
+function renderVersionTable(devices) {
+    const tbody = document.getElementById('version-table-body');
+    if (!tbody) return;
+
+    if (!devices.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999; padding:20px;">No devices registered</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    devices.forEach(dev => {
+        const tr = document.createElement('tr');
+        const statusBadge = dev.isOnline
+            ? `<span class="badge online"><span class="badge-dot"></span>Online</span>`
+            : `<span class="badge offline"><span class="badge-dot"></span>Offline</span>`;
+
+        const pending = dev.pendingUpdate
+            ? `<span class="fw-badge scheduled">v${escapeHtml(dev.pendingUpdate.version)} queued</span>`
+            : '—';
+
+        tr.innerHTML = `
+            <td>${statusBadge}</td>
+            <td style="font-family:'Courier New', monospace; font-weight:600; color:#4b5563;">${escapeHtml(dev.deviceId)}</td>
+            <td><span class="fw-version">${escapeHtml(dev.firmwareVersion || 'unknown')}</span></td>
+            <td>${pending}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// 16. SCHEDULE UPDATE MODAL
+function openScheduleModal() {
+    // Set default date to now + 5 minutes
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 5);
+    const local = now.toISOString().slice(0, 16);
+    document.getElementById('ota-schedule-date').value = local;
+
+    // Populate device checklist
+    populateDeviceChecklist('ota-device-checklist', _allDevicesCache);
+
+    document.getElementById('schedule-modal').style.display = 'flex';
+}
+
+function closeScheduleModal() {
+    document.getElementById('schedule-modal').style.display = 'none';
+}
+
+function toggleOtaDeviceList() {
+    const selected = document.querySelector('input[name="ota-target"]:checked').value;
+    document.getElementById('ota-device-select-container').style.display = selected === 'specific' ? 'block' : 'none';
+}
+
+async function submitScheduleUpdate() {
+    const version = document.getElementById('ota-version').value.trim();
+    const githubUrl = document.getElementById('ota-github-url').value.trim();
+    const scheduledAt = document.getElementById('ota-schedule-date').value;
+    const targetType = document.querySelector('input[name="ota-target"]:checked').value;
+
+    if (!version || !githubUrl || !scheduledAt) {
+        return alert('Please fill all required fields');
+    }
+
+    let targetDevices = [];
+    if (targetType === 'specific') {
+        targetDevices = getCheckedDevices('ota-device-checklist');
+        if (!targetDevices.length) return alert('Please select at least one device');
+    }
+
+    try {
+        const res = await fetch(`${API_URL}/admin/firmware`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            body: JSON.stringify({
+                version,
+                githubUrl,
+                scheduledAt: new Date(scheduledAt).toISOString(),
+                targetType,
+                targetDevices
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            closeScheduleModal();
+            loadFirmwareHistory();
+            alert(`Firmware v${version} scheduled successfully!`);
+        } else {
+            alert(data.error || 'Failed to schedule');
+        }
+    } catch (err) {
+        alert('Server Error');
+    }
+}
+
+// 17. ROLLBACK MODAL
+function openRollbackModal(firmwareId, version) {
+    document.getElementById('rollback-firmware-id').value = firmwareId;
+    document.getElementById('rollback-version-label').textContent = 'v' + version;
+    populateDeviceChecklist('rollback-device-checklist', _allDevicesCache);
+    document.getElementById('rollback-modal').style.display = 'flex';
+}
+
+function toggleRollbackDeviceList() {
+    const selected = document.querySelector('input[name="rollback-target"]:checked').value;
+    document.getElementById('rollback-device-select-container').style.display = selected === 'specific' ? 'block' : 'none';
+}
+
+async function submitRollback() {
+    const firmwareId = document.getElementById('rollback-firmware-id').value;
+    const targetType = document.querySelector('input[name="rollback-target"]:checked').value;
+
+    let targetDevices = [];
+    if (targetType === 'specific') {
+        targetDevices = getCheckedDevices('rollback-device-checklist');
+        if (!targetDevices.length) return alert('Please select at least one device');
+    }
+
+    if (!confirm('Are you sure you want to rollback firmware?')) return;
+
+    try {
+        const res = await fetch(`${API_URL}/admin/firmware/rollback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            body: JSON.stringify({ firmwareId, targetType, targetDevices })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            document.getElementById('rollback-modal').style.display = 'none';
+            loadFirmwareHistory();
+            loadDeviceVersions();
+            alert(`Rollback to ${data.version} initiated!`);
+        } else {
+            alert(data.error || 'Rollback failed');
+        }
+    } catch (err) {
+        alert('Server Error');
+    }
+}
+
+// 18. DEVICE CHECKLIST HELPERS
+function populateDeviceChecklist(containerId, devices) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!devices.length) {
+        container.innerHTML = '<div style="padding:10px; color:#999; text-align:center;">No devices found</div>';
+        return;
+    }
+
+    container.innerHTML = devices.map(dev => `
+        <label class="ota-device-item">
+            <input type="checkbox" value="${escapeHtml(dev.deviceId)}">
+            <span style="font-family:'Courier New',monospace; font-weight:600;">${escapeHtml(dev.deviceId)}</span>
+            ${dev.isOnline
+            ? '<span class="badge online" style="margin-left:auto;"><span class="badge-dot"></span>Online</span>'
+            : '<span class="badge offline" style="margin-left:auto;"><span class="badge-dot"></span>Offline</span>'
+        }
+        </label>
+    `).join('');
+}
+
+function getCheckedDevices(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(cb => cb.value);
 }

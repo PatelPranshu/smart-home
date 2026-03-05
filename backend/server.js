@@ -6,9 +6,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mqtt = require('mqtt');
 const cors = require('cors');
+const fs = require('fs');
+const https = require('https');
+const http = require('http');
 const User = require('./models/User');
 const Device = require('./models/Device');
 const History = require('./models/History');
+const Firmware = require('./models/Firmware');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
@@ -16,6 +20,10 @@ const { body, validationResult } = require('express-validator');
 const morgan = require('morgan');
 const { google } = require('googleapis');
 const PORT = process.env.PORT || 3000;
+
+// --- OTA: Ensure firmware storage directory exists ---
+const FIRMWARE_DIR = path.join(__dirname, 'firmware_cache');
+if (!fs.existsSync(FIRMWARE_DIR)) fs.mkdirSync(FIRMWARE_DIR, { recursive: true });
 
 
 const app = express();
@@ -187,6 +195,7 @@ mqttClient.on('connect', () => {
     mqttClient.subscribe('$share/backend/devices/+/sync');
     mqttClient.subscribe('$share/backend/devices/+/status');
     mqttClient.subscribe('$share/backend/devices/+/sensor');
+    mqttClient.subscribe('$share/backend/devices/+/version'); // OTA: Firmware version reports
 });
 
 // Handle MQTT Messages
@@ -304,6 +313,33 @@ mqttClient.on('message', async (topic, message) => {
                     { $set: { isOnline: isOnline } }
                 );
 
+                // OTA: If device just came online and has a pending update, push it
+                if (isOnline && device.pendingUpdate) {
+                    (async () => {
+                        try {
+                            const fw = await Firmware.findById(device.pendingUpdate).lean();
+                            if (fw && fw.localFilename && fw.status === 'active') {
+                                // Check user preference
+                                let shouldPush = true;
+                                if (device.owner) {
+                                    const ownerRec = await User.findById(device.owner).lean();
+                                    if (ownerRec && ownerRec.updatePreference === 'manual') {
+                                        shouldPush = false; // User wants manual — don't auto-push
+                                    }
+                                }
+                                if (shouldPush) {
+                                    const downloadUrl = `${process.env.ORIGIN_URL}/api/firmware/download/${fw._id}`;
+                                    mqttClient.publish(`devices/${deviceId}/ota`, JSON.stringify({ url: downloadUrl }));
+                                    console.log(`[OTA] Pushed queued update v${fw.version} to ${deviceId}`);
+                                    await Device.updateOne({ deviceId }, { $set: { pendingUpdate: null } });
+                                }
+                            }
+                        } catch (otaErr) {
+                            console.error(`[OTA Queue Error] ${deviceId}:`, otaErr.message);
+                        }
+                    })();
+                }
+
                 if (device.owner) {
                     // Fetch user to see if they are linked before calling Google
                     const ownerRecord = await User.findById(device.owner).lean();
@@ -334,6 +370,20 @@ mqttClient.on('message', async (topic, message) => {
                 { deviceId: deviceId },
                 { $set: { temperature: data.temp, humidity: data.hum } }
             );
+        }
+
+        // -------------------------------------------------
+        // 5. Handle Firmware Version Reports (OTA)
+        // -------------------------------------------------
+        else if (type === 'version') {
+            const ver = message.toString().trim();
+            if (ver) {
+                await Device.updateOne(
+                    { deviceId: deviceId },
+                    { $set: { firmwareVersion: ver } }
+                );
+                console.log(`[OTA] Device ${deviceId} reported firmware v${ver}`);
+            }
         }
 
     } catch (err) {
@@ -1680,6 +1730,333 @@ app.post('/api/smarthome', auth, async (req, res) => {
         }
     }
 });
+
+// ═══════════════════════════════════════════════════════
+// OTA FIRMWARE UPDATE MANAGEMENT
+// ═══════════════════════════════════════════════════════
+
+// Helper: Download a file from a URL and save to disk
+function downloadFile(url, destPath) {
+    return new Promise((resolve, reject) => {
+        const proto = url.startsWith('https') ? https : http;
+        const file = fs.createWriteStream(destPath);
+        proto.get(url, (response) => {
+            // Follow redirects (GitHub sends 302)
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                file.close();
+                fs.unlinkSync(destPath);
+                return downloadFile(response.headers.location, destPath).then(resolve).catch(reject);
+            }
+            if (response.statusCode !== 200) {
+                file.close();
+                fs.unlinkSync(destPath);
+                return reject(new Error(`Download failed with status ${response.statusCode}`));
+            }
+            response.pipe(file);
+            file.on('finish', () => { file.close(); resolve(); });
+        }).on('error', (err) => {
+            fs.unlink(destPath, () => { }); // Cleanup on error
+            reject(err);
+        });
+    });
+}
+
+// Helper: Push OTA to a list of devices
+async function pushOtaToDevices(firmware, deviceIds) {
+    const downloadUrl = `${process.env.ORIGIN_URL}/api/firmware/download/${firmware._id}`;
+
+    for (const devId of deviceIds) {
+        const device = await Device.findOne({ deviceId: devId }).lean();
+        if (!device) continue;
+
+        if (device.isOnline) {
+            // Check user preference
+            let shouldPush = true;
+            if (device.owner) {
+                const owner = await User.findById(device.owner).lean();
+                if (owner && owner.updatePreference === 'manual') {
+                    shouldPush = false;
+                }
+            }
+
+            if (shouldPush) {
+                mqttClient.publish(`devices/${devId}/ota`, JSON.stringify({ url: downloadUrl }));
+                console.log(`[OTA] Pushed v${firmware.version} to ${devId}`);
+            } else {
+                // Queue it — user will trigger manually from frontend
+                await Device.updateOne({ deviceId: devId }, { $set: { pendingUpdate: firmware._id } });
+            }
+        } else {
+            // Device offline — queue for when it reconnects
+            await Device.updateOne({ deviceId: devId }, { $set: { pendingUpdate: firmware._id } });
+            console.log(`[OTA] Queued v${firmware.version} for offline device ${devId}`);
+        }
+    }
+}
+
+// Admin: List all firmware releases
+app.get('/api/admin/firmware', auth, verifyAdmin, async (req, res) => {
+    try {
+        const releases = await Firmware.find().sort({ createdAt: -1 }).lean();
+        res.json(releases);
+    } catch (err) { res.status(500).json({ error: 'Failed to fetch firmware list' }); }
+});
+
+// Admin: Create / Schedule a new firmware release
+app.post('/api/admin/firmware', auth, verifyAdmin, [
+    body('version').isString().trim().isLength({ min: 1, max: 20 }),
+    body('githubUrl').isURL(),
+    body('scheduledAt').isISO8601(),
+    body('targetType').isIn(['all', 'specific']),
+    body('targetDevices').optional().isArray()
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+
+    const { version, githubUrl, scheduledAt, targetType, targetDevices } = req.body;
+
+    try {
+        // Check for duplicate version
+        const existing = await Firmware.findOne({ version, status: { $ne: 'rolled_back' } });
+        if (existing) return res.status(400).json({ error: `Version ${version} already exists` });
+
+        const firmware = await Firmware.create({
+            version,
+            githubUrl,
+            scheduledAt: new Date(scheduledAt),
+            targetType,
+            targetDevices: targetType === 'specific' ? targetDevices : [],
+            createdBy: req.user.id
+        });
+
+        res.json({ status: 'scheduled', firmware });
+    } catch (err) {
+        console.error('[OTA Create Error]', err);
+        res.status(500).json({ error: 'Failed to schedule firmware' });
+    }
+});
+
+// Admin: Rollback to a previous firmware version
+app.post('/api/admin/firmware/rollback', auth, verifyAdmin, async (req, res) => {
+    const { firmwareId, targetType, targetDevices } = req.body;
+
+    try {
+        const firmware = await Firmware.findById(firmwareId);
+        if (!firmware) return res.status(404).json({ error: 'Firmware not found' });
+        if (!firmware.localFilename || !fs.existsSync(path.join(FIRMWARE_DIR, firmware.localFilename))) {
+            return res.status(400).json({ error: 'Firmware binary not available for rollback. Re-download needed.' });
+        }
+
+        // Determine target devices
+        let deviceIds;
+        if (targetType === 'specific' && Array.isArray(targetDevices) && targetDevices.length > 0) {
+            deviceIds = targetDevices;
+        } else {
+            const allDevices = await Device.find().select('deviceId').lean();
+            deviceIds = allDevices.map(d => d.deviceId);
+        }
+
+        // Mark old active versions as rolled back
+        await Firmware.updateMany(
+            { status: 'active', _id: { $ne: firmware._id } },
+            { $set: { status: 'rolled_back' } }
+        );
+
+        firmware.status = 'active';
+        firmware.releasedAt = new Date();
+        await firmware.save();
+
+        // Push OTA
+        await pushOtaToDevices(firmware, deviceIds);
+
+        res.json({ status: 'rollback_initiated', version: firmware.version });
+    } catch (err) {
+        console.error('[OTA Rollback Error]', err);
+        res.status(500).json({ error: 'Rollback failed' });
+    }
+});
+
+// Admin: Device version tracking
+app.get('/api/admin/device-versions', auth, verifyAdmin, async (req, res) => {
+    try {
+        const devices = await Device.find()
+            .select('deviceId isOnline firmwareVersion pendingUpdate')
+            .populate('pendingUpdate', 'version')
+            .lean();
+        res.json(devices);
+    } catch (err) { res.status(500).json({ error: 'Failed to fetch device versions' }); }
+});
+
+// Firmware binary download (ESP32 fetches from here — no JWT auth needed)
+app.get('/api/firmware/download/:id', async (req, res) => {
+    try {
+        const firmware = await Firmware.findById(req.params.id).lean();
+        if (!firmware || !firmware.localFilename) {
+            return res.status(404).send('Firmware not found');
+        }
+
+        const filePath = path.join(FIRMWARE_DIR, firmware.localFilename);
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).send('Binary file missing');
+        }
+
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Disposition', `attachment; filename="firmware_v${firmware.version}.bin"`);
+        fs.createReadStream(filePath).pipe(res);
+    } catch (err) {
+        console.error('[Firmware Download Error]', err);
+        res.status(500).send('Download failed');
+    }
+});
+
+// User: Get update preference
+app.get('/api/user/update-preference', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('updatePreference updateSnoozeUntil').lean();
+        res.json({
+            preference: user.updatePreference || 'auto',
+            snoozeUntil: user.updateSnoozeUntil
+        });
+    } catch (err) { res.status(500).json({ error: 'Failed to fetch preference' }); }
+});
+
+// User: Set update preference
+app.post('/api/user/update-preference', auth, async (req, res) => {
+    const { preference, snoozeUntil } = req.body;
+    try {
+        const updates = {};
+        if (preference === 'auto' || preference === 'manual') {
+            updates.updatePreference = preference;
+        }
+        if (snoozeUntil) {
+            updates.updateSnoozeUntil = new Date(snoozeUntil);
+        } else if (snoozeUntil === null) {
+            updates.updateSnoozeUntil = null;
+        }
+
+        await User.findByIdAndUpdate(req.user.id, updates);
+        res.json({ status: 'updated' });
+    } catch (err) { res.status(500).json({ error: 'Update failed' }); }
+});
+
+// User: Check for pending updates on their devices
+app.get('/api/user/pending-updates', auth, async (req, res) => {
+    try {
+        const devices = await Device.find({ owner: req.user.id, pendingUpdate: { $ne: null } })
+            .populate('pendingUpdate', 'version scheduledAt')
+            .select('deviceId pendingUpdate')
+            .lean();
+
+        // Also check for active firmware that hasn't been pushed to manual-preference users
+        const user = await User.findById(req.user.id).lean();
+        const latestActive = await Firmware.findOne({ status: 'active' }).sort({ releasedAt: -1 }).lean();
+
+        let updateAvailable = null;
+        if (latestActive && user.updatePreference === 'manual') {
+            // Check snooze
+            const isSnoozed = user.updateSnoozeUntil && new Date(user.updateSnoozeUntil) > new Date();
+            if (!isSnoozed) {
+                // Check if any user device is NOT on this version
+                const userDevices = await Device.find({ owner: req.user.id }).select('firmwareVersion').lean();
+                const needsUpdate = userDevices.some(d => d.firmwareVersion !== latestActive.version);
+                if (needsUpdate) {
+                    updateAvailable = {
+                        firmwareId: latestActive._id,
+                        version: latestActive.version,
+                        releasedAt: latestActive.releasedAt
+                    };
+                }
+            }
+        }
+
+        res.json({ pendingDevices: devices, updateAvailable });
+    } catch (err) { res.status(500).json({ error: 'Failed to check updates' }); }
+});
+
+// User: Manually trigger OTA update on their devices
+app.post('/api/user/trigger-update', auth, async (req, res) => {
+    const { firmwareId } = req.body;
+    try {
+        const firmware = await Firmware.findById(firmwareId).lean();
+        if (!firmware || !firmware.localFilename) {
+            return res.status(404).json({ error: 'Firmware not found or not ready' });
+        }
+
+        const userDevices = await Device.find({ owner: req.user.id }).select('deviceId isOnline firmwareVersion').lean();
+        const downloadUrl = `${process.env.ORIGIN_URL}/api/firmware/download/${firmware._id}`;
+        let pushed = 0;
+
+        for (const dev of userDevices) {
+            if (dev.firmwareVersion !== firmware.version) {
+                if (dev.isOnline) {
+                    mqttClient.publish(`devices/${dev.deviceId}/ota`, JSON.stringify({ url: downloadUrl }));
+                    pushed++;
+                } else {
+                    await Device.updateOne({ deviceId: dev.deviceId }, { $set: { pendingUpdate: firmware._id } });
+                }
+            }
+        }
+
+        // Clear snooze since user explicitly chose to update
+        await User.findByIdAndUpdate(req.user.id, { updateSnoozeUntil: null });
+
+        res.json({ status: 'triggered', devicesPushed: pushed });
+    } catch (err) {
+        console.error('[OTA Trigger Error]', err);
+        res.status(500).json({ error: 'Update trigger failed' });
+    }
+});
+
+// ── OTA Scheduler: Check for pending releases every 60 seconds ──
+setInterval(async () => {
+    try {
+        const pendingReleases = await Firmware.find({
+            status: 'scheduled',
+            scheduledAt: { $lte: new Date() }
+        });
+
+        for (const fw of pendingReleases) {
+            console.log(`[OTA Scheduler] Releasing firmware v${fw.version}...`);
+
+            // 1. Download binary from GitHub
+            const filename = `firmware_v${fw.version}_${Date.now()}.bin`;
+            const filePath = path.join(FIRMWARE_DIR, filename);
+
+            try {
+                fw.status = 'downloading';
+                await fw.save();
+
+                await downloadFile(fw.githubUrl, filePath);
+
+                fw.localFilename = filename;
+                fw.status = 'active';
+                fw.releasedAt = new Date();
+                await fw.save();
+
+                console.log(`[OTA] Binary downloaded: ${filename}`);
+            } catch (dlErr) {
+                console.error(`[OTA] Download failed for v${fw.version}:`, dlErr.message);
+                fw.status = 'failed';
+                await fw.save();
+                continue;
+            }
+
+            // 2. Determine target devices
+            let deviceIds;
+            if (fw.targetType === 'specific' && fw.targetDevices.length > 0) {
+                deviceIds = fw.targetDevices;
+            } else {
+                const allDevices = await Device.find().select('deviceId').lean();
+                deviceIds = allDevices.map(d => d.deviceId);
+            }
+
+            // 3. Push OTA to devices
+            await pushOtaToDevices(fw, deviceIds);
+        }
+    } catch (err) {
+        console.error('[OTA Scheduler Error]', err.message);
+    }
+}, 60 * 1000); // Every 60 seconds
 
 // ── Health check ──
 app.get('/api/health', (req, res) => {

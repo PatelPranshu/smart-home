@@ -24,6 +24,10 @@ const DeviceSchema = new mongoose.Schema({
 
   isOnline: { type: Boolean, default: false },
 
+  // Firmware OTA tracking
+  firmwareVersion: { type: String, default: 'unknown' },
+  pendingUpdate: { type: mongoose.Schema.Types.ObjectId, ref: 'Firmware', default: null },
+
   //sensor fields
   temperature: { type: Number, default: 0 },
   humidity: { type: Number, default: 0 },

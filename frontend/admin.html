@@ -77,6 +77,59 @@
             </table>
         </div>
 
+        <!-- ═══ OTA FIRMWARE MANAGEMENT ═══ -->
+
+        <div class="section-header" style="margin-top: 2.5rem;">
+            <h3><i class="fa-solid fa-cloud-arrow-up" style="margin-right: 10px; color: #10b981;"></i>OTA Firmware
+                Updates</h3>
+            <button class="btn-create" onclick="openScheduleModal()">
+                <i class="fa-solid fa-plus"></i> Schedule Update
+            </button>
+        </div>
+
+        <div class="table-container" style="margin-bottom: 1.5rem;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Version</th>
+                        <th>Status</th>
+                        <th>Scheduled</th>
+                        <th>Released</th>
+                        <th>Target</th>
+                        <th style="text-align: right;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="firmware-table-body">
+                    <tr>
+                        <td colspan="6" style="text-align:center; color:#999; padding:20px;">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section-header" style="margin-top: 2rem;">
+            <h3><i class="fa-solid fa-microchip" style="margin-right: 10px; color: #8b5cf6;"></i>Device Firmware
+                Versions</h3>
+        </div>
+
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Device ID</th>
+                        <th>Firmware</th>
+                        <th>Pending Update</th>
+                    </tr>
+                </thead>
+                <tbody id="version-table-body">
+                    <tr>
+                        <td colspan="4" style="text-align:center; color:#999; padding:20px;">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
     </div>
 
     <div id="create-modal" class="modal" style="display: none;">
@@ -229,6 +282,92 @@
                 style="width: 100%; justify-content: center; margin-bottom: 15px;">Log Out From All Devices</button>
             <button onclick="closeLogoutModal()" class="btn-del"
                 style="width: 100%; background: #f3f4f6; color: #374151; justify-content: center;">Cancel</button>
+        </div>
+    </div>
+
+    <div id="schedule-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 520px;">
+            <h3><i class="fa-solid fa-cloud-arrow-up" style="color: #10b981; margin-right: 10px;"></i>Schedule Firmware
+                Update</h3>
+            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">Upload a compiled .bin from
+                GitHub and choose when to deploy.</p>
+
+            <div class="form-group">
+                <label>Firmware Version</label>
+                <input type="text" id="ota-version" placeholder="e.g. 1.2.0">
+            </div>
+
+            <div class="form-group">
+                <label>GitHub Binary URL (.bin)</label>
+                <input type="url" id="ota-github-url" placeholder="https://github.com/.../firmware.bin">
+            </div>
+
+            <div class="form-group">
+                <label>Scheduled Release Date & Time</label>
+                <input type="datetime-local" id="ota-schedule-date">
+            </div>
+
+            <div class="form-group">
+                <label>Target Devices</label>
+                <div style="display:flex; gap:10px; margin-bottom:10px;">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
+                        <input type="radio" name="ota-target" value="all" checked onchange="toggleOtaDeviceList()"> All
+                        Devices
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
+                        <input type="radio" name="ota-target" value="specific" onchange="toggleOtaDeviceList()">
+                        Specific Devices
+                    </label>
+                </div>
+                <div id="ota-device-select-container"
+                    style="display:none; max-height:150px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px;">
+                    <div id="ota-device-checklist">Loading devices...</div>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:15px; margin-top: 25px;">
+                <button class="btn-create" style="flex:1; justify-content: center;"
+                    onclick="submitScheduleUpdate()">Schedule</button>
+                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;"
+                    onclick="closeScheduleModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="rollback-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 480px;">
+            <h3><i class="fa-solid fa-rotate-left" style="color: var(--warning); margin-right: 10px;"></i>Rollback
+                Firmware</h3>
+            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">
+                Roll back to version <strong id="rollback-version-label">--</strong>. Choose which devices to target.
+            </p>
+
+            <input type="hidden" id="rollback-firmware-id">
+
+            <div class="form-group">
+                <label>Target Devices</label>
+                <div style="display:flex; gap:10px; margin-bottom:10px;">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
+                        <input type="radio" name="rollback-target" value="all" checked
+                            onchange="toggleRollbackDeviceList()"> All Devices
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
+                        <input type="radio" name="rollback-target" value="specific"
+                            onchange="toggleRollbackDeviceList()"> Specific Devices
+                    </label>
+                </div>
+                <div id="rollback-device-select-container"
+                    style="display:none; max-height:150px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px;">
+                    <div id="rollback-device-checklist">Loading devices...</div>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:15px; margin-top: 25px;">
+                <button class="btn-create" style="flex:1; justify-content:center; background: var(--warning);"
+                    onclick="submitRollback()">Rollback</button>
+                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;"
+                    onclick="document.getElementById('rollback-modal').style.display='none'">Cancel</button>
+            </div>
         </div>
     </div>
 

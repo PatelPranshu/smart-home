@@ -971,6 +971,145 @@ async function initSettings() {
 
         } catch (err) { showToast("Failed to send Wi-Fi settings", "error"); }
     };
+
+    // ==========================================
+    // OTA FIRMWARE UPDATE PREFERENCE
+    // ==========================================
+
+    const updateToggle = document.getElementById('update-pref-toggle');
+    const updateSubText = document.getElementById('update-pref-sub');
+
+    // Load current preference
+    try {
+        const res = await fetch(`${API_URL}/user/update-preference`, {
+            headers: { 'x-access-token': token }
+        });
+        const data = await res.json();
+        if (updateToggle) {
+            updateToggle.checked = (data.preference === 'auto');
+        }
+        if (updateSubText) {
+            updateSubText.textContent = data.preference === 'auto'
+                ? 'Devices update silently in the background'
+                : 'You will be notified when updates are available';
+        }
+    } catch (err) { console.error('[OTA] Failed to load update preference'); }
+
+    // Toggle handler
+    window.toggleUpdatePreference = async () => {
+        const isAuto = updateToggle ? updateToggle.checked : true;
+        const preference = isAuto ? 'auto' : 'manual';
+
+        try {
+            await fetch(`${API_URL}/user/update-preference`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ preference })
+            });
+
+            if (updateSubText) {
+                updateSubText.textContent = isAuto
+                    ? 'Devices update silently in the background'
+                    : 'You will be notified when updates are available';
+            }
+
+            showToast(isAuto ? 'Automatic updates enabled' : 'Manual update mode — you\'ll be notified', isAuto ? 'success' : 'info');
+        } catch (err) {
+            showToast('Failed to update preference', 'error');
+            if (updateToggle) updateToggle.checked = !isAuto; // Revert on error
+        }
+    };
+
+    // ==========================================
+    // OTA PENDING UPDATE CHECKER (Manual Mode)
+    // ==========================================
+    async function checkPendingUpdates() {
+        try {
+            const res = await fetch(`${API_URL}/user/pending-updates`, {
+                headers: { 'x-access-token': token }
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+
+            if (data.updateAvailable) {
+                showOtaToast(data.updateAvailable);
+            }
+        } catch (err) { /* Silent fail */ }
+    }
+
+    function showOtaToast(update) {
+        // Don't show if one already visible
+        if (document.getElementById('ota-toast')) return;
+
+        const toast = document.createElement('div');
+        toast.id = 'ota-toast';
+        toast.className = 'ota-update-toast';
+        toast.innerHTML = `
+            <div class="ota-toast-icon">
+                <i class="fa-solid fa-cloud-arrow-down"></i>
+            </div>
+            <div class="ota-toast-body">
+                <div class="ota-toast-title">Firmware Update Available</div>
+                <div class="ota-toast-version">Version ${update.version} is ready to install</div>
+            </div>
+            <div class="ota-toast-actions">
+                <button class="ota-btn-update" onclick="triggerOtaUpdate('${update.firmwareId}')">Update Now</button>
+                <button class="ota-btn-later" onclick="snoozeOtaUpdate()">Later</button>
+            </div>
+        `;
+        document.body.appendChild(toast);
+
+        // Animate in
+        requestAnimationFrame(() => toast.classList.add('visible'));
+    }
+
+    window.triggerOtaUpdate = async (firmwareId) => {
+        const toast = document.getElementById('ota-toast');
+        if (toast) toast.remove();
+
+        showToast('Starting firmware update...', 'info');
+
+        try {
+            const res = await fetch(`${API_URL}/user/trigger-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ firmwareId })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`Update sent to ${data.devicesPushed} device(s)`, 'success');
+            } else {
+                showToast(data.error || 'Update failed', 'error');
+            }
+        } catch (err) {
+            showToast('Server error', 'error');
+        }
+    };
+
+    window.snoozeOtaUpdate = async () => {
+        const toast = document.getElementById('ota-toast');
+        if (toast) {
+            toast.classList.remove('visible');
+            setTimeout(() => toast.remove(), 400);
+        }
+
+        // Snooze for 3 days
+        const snoozeUntil = new Date();
+        snoozeUntil.setDate(snoozeUntil.getDate() + 3);
+
+        try {
+            await fetch(`${API_URL}/user/update-preference`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ snoozeUntil: snoozeUntil.toISOString() })
+            });
+            showToast('Update snoozed for 3 days', 'info');
+        } catch (err) { /* Silent fail */ }
+    };
+
+    // Check immediately, then every 60 seconds
+    checkPendingUpdates();
+    setInterval(checkPendingUpdates, 60 * 1000);
 }
 
 

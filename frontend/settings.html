@@ -58,6 +58,30 @@
             </div>
 
             <div class="settings-group" style="margin-top: 25px;">
+                <h3 class="group-title">Firmware Updates</h3>
+
+                <div class="settings-card"
+                    style="display: flex; justify-content: space-between; align-items: center; padding: 15px; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div
+                            style="width: 40px; height: 40px; background: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #16a34a; font-size: 1.2rem;">
+                            <i class="fa-solid fa-cloud-arrow-down"></i>
+                        </div>
+                        <div>
+                            <span style="font-weight: 600; color: #333; display: block;">Automatic Updates</span>
+                            <span id="update-pref-sub" style="font-size: 0.75rem; color: #6b7280;">Devices update
+                                silently in the background</span>
+                        </div>
+                    </div>
+
+                    <label class="switch">
+                        <input type="checkbox" id="update-pref-toggle" checked onchange="toggleUpdatePreference()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-group" style="margin-top: 25px;">
                 <h3 class="group-title">Device Management</h3>
 
                 <div class="settings-card-list">

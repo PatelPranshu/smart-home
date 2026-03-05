@@ -15,6 +15,10 @@ const UserSchema = new mongoose.Schema({
 
   isGoogleLinked: { type: Boolean, default: false },
 
+  // OTA Update Preferences
+  updatePreference: { type: String, default: 'auto', enum: ['auto', 'manual'] },
+  updateSnoozeUntil: { type: Date, default: null },
+
   createdAt: { type: Date, default: Date.now }
 });
 
