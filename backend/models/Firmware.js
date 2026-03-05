@@ -9,7 +9,7 @@ const FirmwareSchema = new mongoose.Schema({
     status: {
         type: String,
         default: 'scheduled',
-        enum: ['scheduled', 'downloading', 'active', 'rolled_back', 'failed']
+        enum: ['scheduled', 'downloading', 'active', 'rolled_back', 'failed', 'cancelled']
     },
     targetType: {
         type: String,

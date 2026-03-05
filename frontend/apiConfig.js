@@ -3,8 +3,8 @@
 // ==========================================
 
 const SERVERS = [
-    'https://smart-home-04m4.onrender.com/api',
-    'https://smart-home-emergency.onrender.com/api'
+    'http://localhost:3000/api',
+    'http://localhost:3000/api'
 ];
 
 // --- Server Mode Management ---

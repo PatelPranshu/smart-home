@@ -18,8 +18,90 @@ const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const { body, validationResult } = require('express-validator');
 const morgan = require('morgan');
+
+// ==========================================
+// 0. LIGHTWEIGHT IN-MEMORY CACHE (Zero Dependency)
+// ==========================================
+// Caches Mongoose documents to prevent db-thrashing on Free Tier
+class NativeCache {
+    constructor(ttlSeconds = 15) {
+        this.cache = new Map();
+        this.ttl = ttlSeconds * 1000;
+    }
+    set(key, value, customTtlMs) {
+        const expiresMs = customTtlMs !== undefined ? customTtlMs : this.ttl;
+        this.cache.set(key, { data: value, expiry: Date.now() + expiresMs });
+    }
+    get(key) {
+        const item = this.cache.get(key);
+        if (!item) return null;
+        if (Date.now() > item.expiry) {
+            this.cache.delete(key);
+            return null;
+        }
+        return item.data;
+    }
+    delete(key) { this.cache.delete(key); }
+    clear() { this.cache.clear(); }
+}
+const deviceCache = new NativeCache(15); // Cache devices for 15 seconds
 const { google } = require('googleapis');
 const PORT = process.env.PORT || 3000;
+
+// ==========================================
+// 1. BACKGROUND TASK QUEUE 
+// ==========================================
+// Prevents non-essential operations (History log, Google Home report) 
+// from blocking the Node.js event pool, ensuring MQTT stays lightning fast.
+class BackgroundTaskQueue {
+    static async enqueue(taskFn, taskName = 'BgTask') {
+        // Fire and forget using Promise.resolve()
+        Promise.resolve().then(async () => {
+            try {
+                await taskFn();
+            } catch (err) {
+                console.error(`[BG TASK ERROR - ${taskName}]`, err.message);
+            }
+        });
+    }
+}
+
+// RATE LIMITER FOR GOOGLE HOME (Debounce)
+// Maps user_id -> { timeoutTarget: NodeJS.Timeout, states: {} }
+const googleReportQueue = new Map();
+
+async function queueGoogleReport(userIdStr, statesPayload) {
+    if (!googleReportQueue.has(userIdStr)) {
+        googleReportQueue.set(userIdStr, { states: {} });
+    }
+
+    const userQueue = googleReportQueue.get(userIdStr);
+
+    // Merge new states
+    Object.assign(userQueue.states, statesPayload);
+
+    // Reset debounce timer (2 seconds)
+    if (userQueue.timeout) clearTimeout(userQueue.timeout);
+
+    userQueue.timeout = setTimeout(() => {
+        const mergedStates = { ...userQueue.states };
+        googleReportQueue.delete(userIdStr);
+
+        BackgroundTaskQueue.enqueue(async () => {
+            try {
+                await reportStateToGoogle(userIdStr, mergedStates);
+            } catch (error) {
+                const status = error?.response?.status || error?.status;
+                if (status === 404) {
+                    console.warn(`[BG GOOGLE] User ${userIdStr} unlinked. Disabling auto-reporting.`);
+                    await User.findByIdAndUpdate(userIdStr, { isGoogleLinked: false });
+                } else {
+                    throw error; // Let BackgroundQueue catch block print it
+                }
+            }
+        }, 'GoogleReportState');
+    }, 2000);
+}
 
 // --- OTA: Ensure firmware storage directory exists ---
 const FIRMWARE_DIR = path.join(__dirname, 'firmware_cache');
@@ -216,8 +298,12 @@ mqttClient.on('message', async (topic, message) => {
         if (type === 'update') {
             const data = JSON.parse(message.toString());
 
-            // Use .lean() for faster lookup as we only need read-only inversion config here
-            const device = await Device.findOne({ deviceId }).populate('owner', 'isGoogleLinked').lean();
+            // Cache check
+            let device = deviceCache.get(deviceId);
+            if (!device) {
+                device = await Device.findOne({ deviceId }).populate('owner', 'isGoogleLinked').lean();
+                if (device) deviceCache.set(deviceId, device);
+            }
 
             if (!device) return;
 
@@ -242,12 +328,13 @@ mqttClient.on('message', async (topic, message) => {
                 { $set: updateFields }
             );
 
-            // BACKGROUND TASKS: Run History and Google reporting without 'await' 
-            // to keep the MQTT processing loop fast.
-            (async () => {
-                try {
-                    // Log to History
-                    if (!device.owner) return;
+            // Invalidate cache for this device
+            deviceCache.delete(deviceId);
+
+            // BACKGROUND TASKS: Run History and Google reporting via queue
+            BackgroundTaskQueue.enqueue(async () => {
+                // Log to History
+                if (device.owner) {
                     await History.create({
                         owner: device.owner._id,
                         deviceId: deviceId,
@@ -255,29 +342,16 @@ mqttClient.on('message', async (topic, message) => {
                         action: userIntentState ? "Turned ON (Physical)" : "Turned OFF (Physical)",
                         timestamp: new Date()
                     });
-
-                    // REPORT STATE TO GOOGLE
-
-                    if (device.owner.isGoogleLinked === true) {
-                        try {
-                            await reportStateToGoogle(
-                                device.owner._id.toString(),
-                                { [`${deviceId}-${data.switchId}`]: { on: userIntentState, online: device.isOnline || true } }
-                            );
-                        } catch (error) {
-                            const status = error?.response?.status || error?.status;
-                            if (status === 404) {
-                                console.warn(`⚠️ User ${device.owner._id} unlinked from Google. Disabling auto-reporting.`);
-                                await User.findByIdAndUpdate(device.owner._id, { isGoogleLinked: false });
-                            } else {
-                                console.error("MQTT Google Report Error:", error.message);
-                            }
-                        }
-                    }
-                } catch (bgErr) {
-                    console.error(`[BG TASK ERROR] ${deviceId}:`, bgErr.message);
                 }
-            })();
+            }, 'HistoryLog');
+
+            // REPORT STATE TO GOOGLE (Debounced)
+            if (device.owner && device.owner.isGoogleLinked === true) {
+                queueGoogleReport(
+                    device.owner._id.toString(),
+                    { [`${deviceId}-${data.switchId}`]: { on: userIntentState, online: device.isOnline || true } }
+                );
+            }
         }
 
         // -------------------------------------------------
@@ -303,18 +377,21 @@ mqttClient.on('message', async (topic, message) => {
             const status = message.toString().trim();
             const isOnline = status === 'online';
 
-            const device = await Device.findOne({ deviceId }).lean();
+            // BUG FIX: Avoid stale reads during rapid reconnects by updating DB FIRST
+            const updateResult = await Device.updateOne(
+                { deviceId: deviceId },
+                { $set: { isOnline: isOnline } }
+            );
 
-            if (device && device.isOnline !== isOnline) {
+            if (updateResult.modifiedCount > 0) {
                 console.log(`Device ${deviceId} is now ${status}`);
 
-                await Device.updateOne(
-                    { deviceId: deviceId },
-                    { $set: { isOnline: isOnline } }
-                );
+                deviceCache.delete(deviceId); // Invalidate cache
+                const device = await Device.findOne({ deviceId }).lean();
+                if (device) deviceCache.set(deviceId, device);
 
                 // OTA: If device just came online and has a pending update, push it
-                if (isOnline && device.pendingUpdate) {
+                if (isOnline && device && device.pendingUpdate) {
                     (async () => {
                         try {
                             const fw = await Firmware.findById(device.pendingUpdate).lean();
@@ -331,7 +408,7 @@ mqttClient.on('message', async (topic, message) => {
                                     const downloadUrl = `${process.env.ORIGIN_URL}/api/firmware/download/${fw._id}`;
                                     mqttClient.publish(`devices/${deviceId}/ota`, JSON.stringify({ url: downloadUrl }));
                                     console.log(`[OTA] Pushed queued update v${fw.version} to ${deviceId}`);
-                                    await Device.updateOne({ deviceId }, { $set: { pendingUpdate: null } });
+                                    await Device.updateOne({ deviceId }, { $set: { pendingUpdate: null, firmwareVersion: fw.version } });
                                 }
                             }
                         } catch (otaErr) {
@@ -348,14 +425,7 @@ mqttClient.on('message', async (topic, message) => {
                         device.switches.forEach(sw => {
                             statesPayload[`${deviceId}-${sw.id}`] = { online: isOnline };
                         });
-
-                        reportStateToGoogle(device.owner.toString(), statesPayload)
-                            .catch(e => {
-                                const status = e?.response?.status || e?.status;
-                                if (status === 404) {
-                                    User.findByIdAndUpdate(device.owner, { isGoogleLinked: false }).catch(() => { });
-                                }
-                            });
+                        queueGoogleReport(device.owner.toString(), statesPayload);
                     }
                 }
             }
@@ -366,10 +436,25 @@ mqttClient.on('message', async (topic, message) => {
         // -------------------------------------------------
         else if (type === 'sensor') {
             const data = JSON.parse(message.toString());
-            await Device.updateOne(
-                { deviceId: deviceId },
-                { $set: { temperature: data.temp, humidity: data.hum } }
-            );
+
+            // 1. Instantly update cache so frontend sees it polling
+            const cachedDevice = deviceCache.get(deviceId);
+            if (cachedDevice) {
+                cachedDevice.temperature = data.temp;
+                cachedDevice.humidity = data.hum;
+            }
+
+            // 2. Throttle DB writes to max once every 60 seconds per device
+            if (!global.sensorLastWritten) global.sensorLastWritten = {};
+            const now = Date.now();
+
+            if (!global.sensorLastWritten[deviceId] || now - global.sensorLastWritten[deviceId] > 60000) {
+                global.sensorLastWritten[deviceId] = now;
+                await Device.updateOne(
+                    { deviceId: deviceId },
+                    { $set: { temperature: data.temp, humidity: data.hum } }
+                );
+            }
         }
 
         // -------------------------------------------------
@@ -378,11 +463,21 @@ mqttClient.on('message', async (topic, message) => {
         else if (type === 'version') {
             const ver = message.toString().trim();
             if (ver) {
-                await Device.updateOne(
-                    { deviceId: deviceId },
-                    { $set: { firmwareVersion: ver } }
-                );
-                console.log(`[OTA] Device ${deviceId} reported firmware v${ver}`);
+                let device = deviceCache.get(deviceId);
+                if (!device) {
+                    device = await Device.findOne({ deviceId }).select('firmwareVersion').lean();
+                }
+
+                const updateFields = { reportedFirmwareVersion: ver };
+
+                // Only set firmwareVersion from MQTT if NOT already set by server OTA push
+                if (!device || !device.firmwareVersion || device.firmwareVersion === 'unknown') {
+                    updateFields.firmwareVersion = ver;
+                }
+
+                await Device.updateOne({ deviceId }, { $set: updateFields });
+                deviceCache.delete(deviceId); // Invalidate 
+                console.log(`[OTA] Device ${deviceId} reported firmware v${ver} (DB version: ${device?.firmwareVersion || 'none'})`);
             }
         }
 
@@ -601,8 +696,15 @@ app.post('/api/user/google-status', auth, async (req, res) => {
 // BUG 6 FIX: Wrapped in try/catch so a DB error doesn't hang the request
 app.get('/api/devices', auth, async (req, res) => {
     try {
-        // .lean() makes this query much faster for production
-        const devices = await Device.find({ owner: req.user.id }).lean();
+        const cacheKey = `user_devices_${req.user.id}`;
+        let devices = deviceCache.get(cacheKey);
+
+        if (!devices) {
+            // .lean() makes this query much faster for production
+            devices = await Device.find({ owner: req.user.id }).lean();
+            // Cache for exactly 2 seconds to relieve frontend polling bottleneck
+            deviceCache.set(cacheKey, devices, 2000);
+        }
         res.json(devices);
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch devices" });
@@ -712,49 +814,39 @@ app.post('/api/control', auth, [
         res.json({ status: 'sent', state });
 
         // Background Tasks: DB update + history + Google report (all run after response)
-        (async () => {
-            try {
-                // Task A: Update Database
-                let updateFields = { "switches.$.state": state };
-                if (state) {
-                    updateFields["switches.$.lastOnTime"] = new Date();
-                } else {
-                    updateFields["switches.$.lastOnTime"] = null;
-                    updateFields["switches.$.timerExpiresAt"] = null;
-                    if (sw.type === 'fan') updateFields["switches.$.speed"] = 0;
-                }
-                await Device.updateOne(
-                    { deviceId: deviceId, "switches.id": switchId },
-                    { $set: updateFields }
-                );
+        // Task A: Update Database (Run immediately before queue)
+        let updateFields = { "switches.$.state": state };
+        if (state) {
+            updateFields["switches.$.lastOnTime"] = new Date();
+        } else {
+            updateFields["switches.$.lastOnTime"] = null;
+            updateFields["switches.$.timerExpiresAt"] = null;
+            if (sw.type === 'fan') updateFields["switches.$.speed"] = 0;
+        }
+        await Device.updateOne(
+            { deviceId: deviceId, "switches.id": switchId },
+            { $set: updateFields }
+        );
 
-                // Task B: Log History
-                await History.create({
-                    owner: req.user.id,
-                    deviceId: deviceId,
-                    switchName: sw.name || `Switch ${switchId}`,
-                    action: state ? "Turned ON (App)" : "Turned OFF (App)"
-                });
+        // Queue History Log
+        BackgroundTaskQueue.enqueue(async () => {
+            await History.create({
+                owner: req.user.id,
+                deviceId: deviceId,
+                switchName: sw.name || `Switch ${switchId}`,
+                action: state ? "Turned ON (App)" : "Turned OFF (App)",
+                timestamp: new Date()
+            });
+        }, 'HistoryLog_Control');
 
-                // Task C: Report to Google
-                try {
-                    const user = await User.findById(req.user.id).lean();
-                    if (user && user.isGoogleLinked === true) {
-                        await reportStateToGoogle(
-                            req.user.id,
-                            { [`${deviceId}-${switchId}`]: { on: state, online: true } }
-                        );
-                    }
-                } catch (error) {
-                    const status = error?.response?.status || error?.status;
-                    if (status === 404) {
-                        await User.findByIdAndUpdate(req.user.id, { isGoogleLinked: false });
-                    }
-                }
-            } catch (bgErr) {
-                console.error("Background Task Error:", bgErr);
-            }
-        })();
+        // Queue Google Report
+        const user = await User.findById(req.user.id).lean();
+        if (user && user.isGoogleLinked === true) {
+            queueGoogleReport(
+                req.user.id,
+                { [`${deviceId}-${switchId}`]: { on: state, online: true } }
+            );
+        }
 
     } catch (err) {
         console.error(err);
@@ -799,25 +891,18 @@ app.post('/api/fan-speed', auth, [
         // Respond immediately
         res.json({ status: 'sent', speed });
 
-        // Background: report new state to Google
-        (async () => {
-            try {
-                const user = await User.findById(req.user.id).lean();
-                if (user && user.isGoogleLinked === true) {
-                    const speedNames = ['', 'Low', 'Medium', 'High', 'Turbo'];
-                    await reportStateToGoogle(req.user.id, {
-                        [`${deviceId}-${switchId}`]: {
-                            on: true,
-                            online: true,
-                            currentFanSpeedSetting: speedNames[speed]
-                        }
-                    });
+        // Background: queue report new state to Google
+        const user = await User.findById(req.user.id).lean();
+        if (user && user.isGoogleLinked === true) {
+            const speedNames = ['', 'Low', 'Medium', 'High', 'Turbo'];
+            queueGoogleReport(req.user.id, {
+                [`${deviceId}-${switchId}`]: {
+                    on: true,
+                    online: true,
+                    currentFanSpeedSetting: speedNames[speed]
                 }
-            } catch (e) {
-                const status = e?.response?.status || e?.status;
-                if (status === 404) await User.findByIdAndUpdate(req.user.id, { isGoogleLinked: false });
-            }
-        })();
+            });
+        }
 
     } catch (err) {
         console.error(err);
@@ -1566,8 +1651,27 @@ app.post('/api/smarthome', auth, async (req, res) => {
         // Group switches by deviceId to minimize DB hits
         const uniqueDeviceIds = [...new Set(requestedDevices.map(d => d.id.split('-')[0]))];
 
-        // Fetch all relevant devices in one go
-        const devices = await Device.find({ deviceId: { $in: uniqueDeviceIds }, owner: userId }).lean();
+        // 1. Check deviceCache first
+        const devices = [];
+        const missingIds = [];
+        for (const id of uniqueDeviceIds) {
+            const cached = deviceCache.get(id);
+            if (cached && cached.owner && cached.owner.toString() === userId) {
+                devices.push(cached);
+            } else {
+                missingIds.push(id);
+            }
+        }
+
+        // 2. Fetch missing from DB and securely assign to cache
+        if (missingIds.length > 0) {
+            const fetchedDb = await Device.find({ deviceId: { $in: missingIds }, owner: userId }).lean();
+            for (const d of fetchedDb) {
+                deviceCache.set(d.deviceId, d);
+                devices.push(d);
+            }
+        }
+
         const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
 
         for (const d of requestedDevices) {
@@ -1781,6 +1885,8 @@ async function pushOtaToDevices(firmware, deviceIds) {
 
             if (shouldPush) {
                 mqttClient.publish(`devices/${devId}/ota`, JSON.stringify({ url: downloadUrl }));
+                // Update firmware version in DB immediately when pushing OTA
+                await Device.updateOne({ deviceId: devId }, { $set: { firmwareVersion: firmware.version } });
                 console.log(`[OTA] Pushed v${firmware.version} to ${devId}`);
             } else {
                 // Queue it — user will trigger manually from frontend
@@ -1800,6 +1906,32 @@ app.get('/api/admin/firmware', auth, verifyAdmin, async (req, res) => {
         const releases = await Firmware.find().sort({ createdAt: -1 }).lean();
         res.json(releases);
     } catch (err) { res.status(500).json({ error: 'Failed to fetch firmware list' }); }
+});
+
+// Admin: Cancel a scheduled firmware update
+app.post('/api/admin/firmware/cancel', auth, verifyAdmin, async (req, res) => {
+    const { firmwareId } = req.body;
+    try {
+        const firmware = await Firmware.findById(firmwareId);
+        if (!firmware) return res.status(404).json({ error: 'Firmware not found' });
+        if (firmware.status !== 'scheduled') {
+            return res.status(400).json({ error: `Cannot cancel — status is "${firmware.status}"` });
+        }
+
+        firmware.status = 'cancelled';
+        await firmware.save();
+
+        // Clear any pending device queues pointing to this firmware
+        await Device.updateMany(
+            { pendingUpdate: firmware._id },
+            { $set: { pendingUpdate: null } }
+        );
+
+        res.json({ status: 'cancelled', version: firmware.version });
+    } catch (err) {
+        console.error('[OTA Cancel Error]', err);
+        res.status(500).json({ error: 'Cancel failed' });
+    }
 });
 
 // Admin: Create / Schedule a new firmware release
@@ -1900,6 +2032,9 @@ app.get('/api/firmware/download/:id', async (req, res) => {
             return res.status(404).send('Binary file missing');
         }
 
+        // --- NEW: Calculate exact file size and send Content-Length ---
+        const stat = fs.statSync(filePath);
+        res.setHeader('Content-Length', stat.size);
         res.setHeader('Content-Type', 'application/octet-stream');
         res.setHeader('Content-Disposition', `attachment; filename="firmware_v${firmware.version}.bin"`);
         fs.createReadStream(filePath).pipe(res);
@@ -1932,6 +2067,41 @@ app.post('/api/user/update-preference', auth, async (req, res) => {
             updates.updateSnoozeUntil = new Date(snoozeUntil);
         } else if (snoozeUntil === null) {
             updates.updateSnoozeUntil = null;
+        }
+
+        // Switching to auto: clear snooze and push pending updates
+        if (preference === 'auto') {
+            updates.updateSnoozeUntil = null;
+
+            // Fire-and-forget: push any pending/active updates to user's devices
+            (async () => {
+                try {
+                    const userDevices = await Device.find({ owner: req.user.id }).select('deviceId isOnline pendingUpdate firmwareVersion').lean();
+                    const latestActive = await Firmware.findOne({ status: 'active' }).sort({ releasedAt: -1 }).lean();
+
+                    for (const dev of userDevices) {
+                        // Push queued pending update
+                        if (dev.pendingUpdate) {
+                            const fw = await Firmware.findById(dev.pendingUpdate).lean();
+                            if (fw && fw.localFilename && dev.isOnline) {
+                                const downloadUrl = `${process.env.ORIGIN_URL}/api/firmware/download/${fw._id}`;
+                                mqttClient.publish(`devices/${dev.deviceId}/ota`, JSON.stringify({ url: downloadUrl }));
+                                await Device.updateOne({ deviceId: dev.deviceId }, { $set: { pendingUpdate: null, firmwareVersion: fw.version } });
+                                console.log(`[OTA] Auto-mode push: v${fw.version} to ${dev.deviceId}`);
+                            }
+                        }
+                        // Or push latest active firmware if device is on older version
+                        else if (latestActive && latestActive.localFilename && dev.isOnline && dev.firmwareVersion !== latestActive.version) {
+                            const downloadUrl = `${process.env.ORIGIN_URL}/api/firmware/download/${latestActive._id}`;
+                            mqttClient.publish(`devices/${dev.deviceId}/ota`, JSON.stringify({ url: downloadUrl }));
+                            await Device.updateOne({ deviceId: dev.deviceId }, { $set: { firmwareVersion: latestActive.version } });
+                            console.log(`[OTA] Auto-mode push: v${latestActive.version} to ${dev.deviceId}`);
+                        }
+                    }
+                } catch (otaErr) {
+                    console.error('[OTA Auto-Push Error]', otaErr.message);
+                }
+            })();
         }
 
         await User.findByIdAndUpdate(req.user.id, updates);
@@ -1990,6 +2160,8 @@ app.post('/api/user/trigger-update', auth, async (req, res) => {
             if (dev.firmwareVersion !== firmware.version) {
                 if (dev.isOnline) {
                     mqttClient.publish(`devices/${dev.deviceId}/ota`, JSON.stringify({ url: downloadUrl }));
+                    // Update firmware version in DB immediately
+                    await Device.updateOne({ deviceId: dev.deviceId }, { $set: { firmwareVersion: firmware.version } });
                     pushed++;
                 } else {
                     await Device.updateOne({ deviceId: dev.deviceId }, { $set: { pendingUpdate: firmware._id } });

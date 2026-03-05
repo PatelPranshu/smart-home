@@ -4,36 +4,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Panel - Smart Home Factory</title>
+    <title>Admin Command Center — Smart Home</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+        rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <link rel="stylesheet" href="admin.css">
-
 </head>
 
 <body>
 
+    <!-- ═══ AUTH OVERLAY ═══ -->
     <div id="auth-overlay">
         <div class="auth-box">
-            <div style="text-align: center; margin-bottom: 20px; font-size: 3rem; color: var(--primary);">
-                <i class="fa-solid fa-shield-halved"></i>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fa-solid fa-shield-halved" style="font-size: 2.8rem; color: var(--primary);"></i>
             </div>
-            <h3 style="text-align: center;">Admin Access</h3>
-            <p style="text-align:center; color:#6b7280; margin-bottom:20px;">Enter Factory Secret Key</p>
-            <input type="password" id="admin-secret" placeholder="••••••••">
-            <button onclick="adminLogin()">Enter Dashboard</button>
+            <h3 style="text-align: center; color: var(--text-primary);">Command Center</h3>
+            <p style="text-align:center; color:var(--text-muted); margin-bottom:20px; font-size:0.85rem;">Enter Factory
+                Secret Key to access</p>
+            <input type="password" id="admin-secret" placeholder="••••••••" style="margin-bottom:15px;">
+            <button class="btn-create" style="width:100%; justify-content:center;" onclick="adminLogin()">Enter
+                Dashboard</button>
         </div>
     </div>
 
+    <!-- ═══ HEADER ═══ -->
     <header>
-        <h2><i class="fa-solid fa-industry" style="color: #818cf8;"></i> Smart Home Factory</h2>
-        <button class="logout-btn" onclick="openLogoutModal()"><i class="fa-solid fa-right-from-bracket"></i>
-            Logout</button>
+        <h2><i class="fa-solid fa-satellite-dish"></i> Command Center</h2>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size:0.72rem; color:var(--text-muted); display:flex; align-items:center;">
+                <span class="refresh-pulse"></span>LIVE
+            </span>
+            <button class="logout-btn" onclick="openLogoutModal()"><i class="fa-solid fa-right-from-bracket"></i>
+                Logout</button>
+        </div>
     </header>
 
+    <!-- ═══ MAIN CONTAINER ═══ -->
     <div class="container">
 
+        <!-- ── STATS ── -->
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-val" id="val-devices">--</div>
@@ -49,15 +61,16 @@
             </div>
             <div class="stat-card">
                 <div class="stat-val" id="val-unsold" style="color:var(--warning)">--</div>
-                <div class="stat-label"><i class="fa-solid fa-box-open"></i> Unsold Inventory</div>
+                <div class="stat-label"><i class="fa-solid fa-box-open"></i> Unsold Stock</div>
             </div>
         </div>
 
+        <!-- ═══ DEVICE INVENTORY ═══ -->
         <div class="section-header">
             <h3><i class="fa-solid fa-list-check" style="margin-right: 10px; color: var(--primary);"></i>Device
                 Inventory</h3>
             <button class="btn-create" onclick="openCreateModal()">
-                <i class="fa-solid fa-plus"></i> Manufacture Device
+                <i class="fa-solid fa-plus"></i> Manufacture
             </button>
         </div>
 
@@ -68,26 +81,24 @@
                         <th>Status</th>
                         <th>Device ID</th>
                         <th>Secret Code</th>
-                        <th>Owner Email</th>
+                        <th>Owner</th>
                         <th style="text-align: right;">Actions</th>
                     </tr>
                 </thead>
-                <tbody id="device-table-body">
-                </tbody>
+                <tbody id="device-table-body"></tbody>
             </table>
         </div>
 
-        <!-- ═══ OTA FIRMWARE MANAGEMENT ═══ -->
-
-        <div class="section-header" style="margin-top: 2.5rem;">
-            <h3><i class="fa-solid fa-cloud-arrow-up" style="margin-right: 10px; color: #10b981;"></i>OTA Firmware
-                Updates</h3>
+        <!-- ═══ OTA FIRMWARE UPDATES ═══ -->
+        <div class="section-header" style="margin-top: 2rem;">
+            <h3><i class="fa-solid fa-cloud-arrow-up" style="margin-right: 10px; color: var(--success);"></i>OTA
+                Firmware Updates</h3>
             <button class="btn-create" onclick="openScheduleModal()">
-                <i class="fa-solid fa-plus"></i> Schedule Update
+                <i class="fa-solid fa-calendar-plus"></i> Schedule Update
             </button>
         </div>
 
-        <div class="table-container" style="margin-bottom: 1.5rem;">
+        <div class="table-container">
             <table class="data-table">
                 <thead>
                     <tr>
@@ -101,55 +112,50 @@
                 </thead>
                 <tbody id="firmware-table-body">
                     <tr>
-                        <td colspan="6" style="text-align:center; color:#999; padding:20px;">Loading...</td>
+                        <td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px;">Loading
+                            firmware data...</td>
                     </tr>
                 </tbody>
             </table>
         </div>
 
+        <!-- ═══ DEVICE FIRMWARE VERSIONS ═══ -->
         <div class="section-header" style="margin-top: 2rem;">
-            <h3><i class="fa-solid fa-microchip" style="margin-right: 10px; color: #8b5cf6;"></i>Device Firmware
-                Versions</h3>
+            <h3><i class="fa-solid fa-microchip" style="margin-right: 10px; color: var(--purple);"></i>Device Firmware
+                Map</h3>
+            <span style="font-size:0.72rem; color:var(--text-muted);" id="version-count-label">—</span>
         </div>
 
-        <div class="table-container">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Status</th>
-                        <th>Device ID</th>
-                        <th>Firmware</th>
-                        <th>Pending Update</th>
-                    </tr>
-                </thead>
-                <tbody id="version-table-body">
-                    <tr>
-                        <td colspan="4" style="text-align:center; color:#999; padding:20px;">Loading...</td>
-                    </tr>
-                </tbody>
-            </table>
+        <div class="table-container"
+            style="background: transparent; border: none; box-shadow: none; backdrop-filter: none;">
+            <div class="version-grid" id="version-grid-container">
+                <div style="grid-column: 1/-1; text-align:center; color:var(--text-muted); padding:30px;">Loading device
+                    versions...</div>
+            </div>
         </div>
 
     </div>
 
+    <!-- ═══ MODALS ═══ -->
+
+    <!-- Create Device Modal -->
     <div id="create-modal" class="modal" style="display: none;">
         <div class="modal-content">
-            <h3>Manufacture Device</h3>
-            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">Configure a new ESP32 unit for
+            <h3><i class="fa-solid fa-plus-circle" style="color: var(--primary); margin-right: 8px;"></i>Manufacture
+                Device</h3>
+            <p style="margin-bottom: 18px; color: var(--text-muted); font-size: 0.82rem;">Configure a new ESP32 unit for
                 deployment.</p>
 
             <div class="form-group">
                 <label>Device ID</label>
                 <input type="text" id="new-device-id" placeholder="e.g. esp32_A1B2C3...">
-                <p style="font-size: 0.75rem; color: #9ca3af; margin-top: 5px;">Use the ID printed in the ESP32 Serial
-                    Monitor.</p>
+                <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 5px;">Use the ID from ESP32 Serial
+                    Monitor</p>
             </div>
-
             <div class="form-group">
-                <label>Secret Code (Sticker)</label>
+                <label>Secret Code</label>
                 <input type="text" id="new-secret-code" value="123456">
             </div>
-
             <div class="form-group">
                 <label>Active Channels</label>
                 <select id="new-channels">
@@ -158,97 +164,84 @@
                     <option value="9" selected>9 Channels (Max)</option>
                 </select>
             </div>
-
-            <div style="display:flex; gap:15px; margin-top: 25px;">
-                <button class="btn-create" style="flex:1; justify-content: center;"
-                    onclick="submitCreateDevice()">Create Unit</button>
-                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;"
-                    onclick="closeCreateModal()">Cancel</button>
+            <div style="display:flex; gap:12px; margin-top: 20px;">
+                <button class="btn-create" style="flex:1; justify-content:center;" onclick="submitCreateDevice()">Create
+                    Unit</button>
+                <button class="btn-ghost" style="flex:1;" onclick="closeCreateModal()">Cancel</button>
             </div>
         </div>
     </div>
 
+    <!-- Edit Config Modal -->
     <div id="edit-modal" class="modal" style="display: none;">
         <div class="modal-content">
-            <h3>Edit Configuration</h3>
-            <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Change hardware capabilities.</p>
-
+            <h3><i class="fa-solid fa-gear" style="color: var(--warning); margin-right: 8px;"></i>Edit Configuration
+            </h3>
+            <p style="color:var(--text-muted); font-size:0.82rem; margin-bottom:15px;">Change hardware capabilities.</p>
             <input type="hidden" id="edit-device-id">
-
             <div class="form-group">
                 <label>Active Channels</label>
-                <select id="edit-channels" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px;">
+                <select id="edit-channels">
                     <option value="4">4 Channels (Basic)</option>
                     <option value="8">8 Channels (Standard)</option>
                     <option value="9">9 Channels (Max)</option>
                 </select>
             </div>
-
-            <div style="display:flex; gap:10px; margin-top: 20px;">
-                <button class="btn-create" style="flex:1; justify-content:center;" onclick="submitEditChannels()">Save
-                    Changes</button>
-                <button class="btn-del" style="flex:1; background:#f3f4f6; color:#333;"
+            <div style="display:flex; gap:12px; margin-top: 20px;">
+                <button class="btn-create" style="flex:1; justify-content:center;"
+                    onclick="submitEditChannels()">Save</button>
+                <button class="btn-ghost" style="flex:1;"
                     onclick="document.getElementById('edit-modal').style.display='none'">Cancel</button>
             </div>
         </div>
     </div>
 
+    <!-- Pinout Modal -->
     <div id="pin-modal" class="modal" style="display: none;">
-        <div class="modal-content" style="width: 500px;">
-            <h3><i class="fa-solid fa-microchip" style="color: #6366f1; margin-right: 8px;"></i> Device Pinout</h3>
-            <p style="color:#666; font-size:0.9rem; margin-bottom:15px;">Hardware connections for this configuration.
-            </p>
-            <div style="background: #f8fafc; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;">
-                <table class="data-table" style="font-size:0.85rem;">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3><i class="fa-solid fa-microchip" style="color: var(--cyan); margin-right: 8px;"></i>Device Pinout</h3>
+            <p style="color:var(--text-muted); font-size:0.82rem; margin-bottom:15px;">Hardware GPIO connections.</p>
+            <div style="border-radius: 8px; overflow: hidden; border: 1px solid var(--border);">
+                <table class="data-table" style="font-size:0.82rem;">
                     <thead>
                         <tr>
-                            <>Ch</ th>
-                            <th>Relay Pin (Out)</th>
-                            <th>Switch Pin (In)</th>
+                            <th>Ch</th>
+                            <th>Relay Pin</th>
+                            <th>Switch Pin</th>
                         </tr>
                     </thead>
-                    <tbody id="pin-table-body">
-                    </tbody>
+                    <tbody id="pin-table-body"></tbody>
                 </table>
             </div>
             <br>
-            <button class="btn-del"
-                style="background:#e5e7eb; color:#374151; width:100%; padding: 10px; font-weight: 600;"
+            <button class="btn-ghost" style="width:100%;"
                 onclick="document.getElementById('pin-modal').style.display='none'">Close</button>
         </div>
     </div>
 
+    <!-- QR Print Area -->
     <div id="qr-print-area">
-        <h2 style="margin-bottom: 10px; font-size: 1.2rem;">Hardware Configuration Card</h2>
+        <h2 style="margin-bottom: 10px; font-size: 1.2rem; color: var(--text-primary);">Hardware Configuration Card</h2>
         <div id="qrcode" style="display: flex; justify-content: center;"></div>
         <div class="qr-info" id="qr-text" style="margin: 10px 0;"></div>
-
         <div id="qr-hardware-table"></div>
-
-        <p style="margin-top:15px; font-size:0.75rem; color:#6b7280;">
-            Configuration for Smart Home App Setup
+        <p style="margin-top:15px; font-size:0.7rem; color:var(--text-muted);">Configuration for Smart Home App Setup
         </p>
-
         <div class="no-print" style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
-            <button onclick="window.print()" class="btn-small btn-qr" style="padding:10px 20px;">
-                <i class="fa-solid fa-print"></i> Print Sticker
+            <button onclick="window.print()" class="btn-create" style="padding:8px 20px;">
+                <i class="fa-solid fa-print"></i> Print
             </button>
-            <button onclick="closeQr()" class="btn-small" style="padding:10px 20px; background:#f3f4f6; color:#374151;">
-                Close
-            </button>
+            <button onclick="closeQr()" class="btn-ghost" style="padding:8px 20px;">Close</button>
         </div>
     </div>
 
-
+    <!-- Invert Logic Modal -->
     <div id="invert-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 500px;">
-            <h3><i class="fa-solid fa-repeat" style="color: var(--warning); margin-right: 10px;"></i> Logic Inversion
-            </h3>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">
-                Enable this if the relay is wired backward (Normally Closed instead of Normally Open).
-            </p>
-
-            <div class="table-container" style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb;">
+            <h3><i class="fa-solid fa-repeat" style="color: var(--warning); margin-right: 8px;"></i>Logic Inversion</h3>
+            <p style="color: var(--text-muted); font-size: 0.82rem; margin-bottom: 16px;">Enable if relay is wired
+                backward (NC → NO).</p>
+            <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
                 <table class="data-table">
                     <thead>
                         <tr>
@@ -256,116 +249,118 @@
                             <th style="text-align: right;">Inverted?</th>
                         </tr>
                     </thead>
-                    <tbody id="invert-table-body">
-                    </tbody>
+                    <tbody id="invert-table-body"></tbody>
                 </table>
             </div>
-
-            <div style="margin-top: 25px;">
-                <button class="btn-del" style="width: 100%; background: #f3f4f6; color: #374151;"
+            <div style="margin-top: 20px;">
+                <button class="btn-ghost" style="width: 100%;"
                     onclick="document.getElementById('invert-modal').style.display='none'">Close</button>
             </div>
         </div>
     </div>
 
+    <!-- Logout Modal -->
     <div id="logout-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 400px; text-align: center;">
             <h3>Log Out Options</h3>
-            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
-                Would you like to log out of only this device or all devices currently logged in?
-            </p>
-
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">Choose logout scope.</p>
             <button onclick="logoutThisDevice()" class="btn-create"
-                style="width: 100%; background: #f59e0b; margin-bottom: 10px; justify-content: center;">Log Out Only
-                This Device</button>
-            <button onclick="logoutAllDevices()" class="btn-del"
-                style="width: 100%; justify-content: center; margin-bottom: 15px;">Log Out From All Devices</button>
-            <button onclick="closeLogoutModal()" class="btn-del"
-                style="width: 100%; background: #f3f4f6; color: #374151; justify-content: center;">Cancel</button>
+                style="width: 100%; margin-bottom: 10px; justify-content: center; background: var(--warning); color: #111;">
+                <i class="fa-solid fa-laptop"></i> This Device Only
+            </button>
+            <button onclick="logoutAllDevices()" class="btn-create"
+                style="width: 100%; margin-bottom: 10px; justify-content: center; background: var(--danger);">
+                <i class="fa-solid fa-right-from-bracket"></i> All Devices
+            </button>
+            <button onclick="closeLogoutModal()" class="btn-ghost" style="width: 100%;">Cancel</button>
         </div>
     </div>
 
+    <!-- Schedule OTA Modal -->
     <div id="schedule-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 520px;">
-            <h3><i class="fa-solid fa-cloud-arrow-up" style="color: #10b981; margin-right: 10px;"></i>Schedule Firmware
-                Update</h3>
-            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">Upload a compiled .bin from
-                GitHub and choose when to deploy.</p>
+            <h3><i class="fa-solid fa-cloud-arrow-up" style="color: var(--success); margin-right: 8px;"></i>Schedule
+                Firmware Update</h3>
+            <p style="margin-bottom: 18px; color: var(--text-muted); font-size: 0.82rem;">Deploy a .bin from GitHub at a
+                scheduled time.</p>
 
             <div class="form-group">
-                <label>Firmware Version</label>
+                <label>Version Tag</label>
                 <input type="text" id="ota-version" placeholder="e.g. 1.2.0">
             </div>
-
             <div class="form-group">
                 <label>GitHub Binary URL (.bin)</label>
                 <input type="url" id="ota-github-url" placeholder="https://github.com/.../firmware.bin">
             </div>
-
             <div class="form-group">
-                <label>Scheduled Release Date & Time</label>
+                <label>Release Date & Time</label>
                 <input type="datetime-local" id="ota-schedule-date">
             </div>
-
             <div class="form-group">
                 <label>Target Devices</label>
-                <div style="display:flex; gap:10px; margin-bottom:10px;">
-                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
-                        <input type="radio" name="ota-target" value="all" checked onchange="toggleOtaDeviceList()"> All
-                        Devices
+                <div style="display:flex; gap:12px; margin-bottom:10px;">
+                    <label
+                        style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.82rem; color:var(--text-secondary);">
+                        <input type="radio" name="ota-target" value="all" checked onchange="toggleOtaDeviceList()"
+                            style="width:auto; accent-color:var(--primary);"> All Devices
                     </label>
-                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
-                        <input type="radio" name="ota-target" value="specific" onchange="toggleOtaDeviceList()">
-                        Specific Devices
+                    <label
+                        style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.82rem; color:var(--text-secondary);">
+                        <input type="radio" name="ota-target" value="specific" onchange="toggleOtaDeviceList()"
+                            style="width:auto; accent-color:var(--primary);"> Specific
                     </label>
                 </div>
                 <div id="ota-device-select-container"
-                    style="display:none; max-height:150px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px;">
+                    style="display:none; max-height:150px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px;">
                     <div id="ota-device-checklist">Loading devices...</div>
                 </div>
             </div>
-
-            <div style="display:flex; gap:15px; margin-top: 25px;">
-                <button class="btn-create" style="flex:1; justify-content: center;"
-                    onclick="submitScheduleUpdate()">Schedule</button>
-                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;"
-                    onclick="closeScheduleModal()">Cancel</button>
+            <div style="display:flex; gap:12px; margin-top: 20px;">
+                <button class="btn-create" style="flex:1; justify-content:center;" onclick="submitScheduleUpdate()">
+                    <i class="fa-solid fa-calendar-check"></i> Schedule
+                </button>
+                <button class="btn-ghost" style="flex:1;" onclick="closeScheduleModal()">Cancel</button>
             </div>
         </div>
     </div>
 
+    <!-- Rollback Modal -->
     <div id="rollback-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 480px;">
-            <h3><i class="fa-solid fa-rotate-left" style="color: var(--warning); margin-right: 10px;"></i>Rollback
+            <h3><i class="fa-solid fa-rotate-left" style="color: var(--warning); margin-right: 8px;"></i>Rollback
                 Firmware</h3>
-            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">
-                Roll back to version <strong id="rollback-version-label">--</strong>. Choose which devices to target.
+            <p style="margin-bottom: 18px; color: var(--text-muted); font-size: 0.82rem;">
+                Rolling back to version <strong style="color:var(--cyan);" id="rollback-version-label">--</strong>.
             </p>
-
             <input type="hidden" id="rollback-firmware-id">
-
             <div class="form-group">
                 <label>Target Devices</label>
-                <div style="display:flex; gap:10px; margin-bottom:10px;">
-                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
+                <div style="display:flex; gap:12px; margin-bottom:10px;">
+                    <label
+                        style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.82rem; color:var(--text-secondary);">
                         <input type="radio" name="rollback-target" value="all" checked
-                            onchange="toggleRollbackDeviceList()"> All Devices
+                            onchange="toggleRollbackDeviceList()" style="width:auto; accent-color:var(--primary);"> All
+                        Devices
                     </label>
-                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem;">
+                    <label
+                        style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.82rem; color:var(--text-secondary);">
                         <input type="radio" name="rollback-target" value="specific"
-                            onchange="toggleRollbackDeviceList()"> Specific Devices
+                            onchange="toggleRollbackDeviceList()" style="width:auto; accent-color:var(--primary);">
+                        Specific
                     </label>
                 </div>
                 <div id="rollback-device-select-container"
-                    style="display:none; max-height:150px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px;">
+                    style="display:none; max-height:150px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px;">
                     <div id="rollback-device-checklist">Loading devices...</div>
                 </div>
             </div>
-
-            <div style="display:flex; gap:15px; margin-top: 25px;">
-                <button class="btn-create" style="flex:1; justify-content:center; background: var(--warning);"
-                    onclick="submitRollback()">Rollback</button>
-                <button class="btn-del" style="flex:1; background: #f3f4f6; color: #374151;"
+            <div style="display:flex; gap:12px; margin-top: 20px;">
+                <button class="btn-create"
+                    style="flex:1; justify-content:center; background:var(--warning); color:#111;"
+                    onclick="submitRollback()">
+                    <i class="fa-solid fa-rotate-left"></i> Execute Rollback
+                </button>
+                <button class="btn-ghost" style="flex:1;"
                     onclick="document.getElementById('rollback-modal').style.display='none'">Cancel</button>
             </div>
         </div>

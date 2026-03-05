@@ -26,6 +26,7 @@ const DeviceSchema = new mongoose.Schema({
 
   // Firmware OTA tracking
   firmwareVersion: { type: String, default: 'unknown' },
+  reportedFirmwareVersion: { type: String, default: null },
   pendingUpdate: { type: mongoose.Schema.Types.ObjectId, ref: 'Firmware', default: null },
 
   //sensor fields

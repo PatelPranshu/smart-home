@@ -530,7 +530,7 @@ void setup() {
   if (!wm.autoConnect(apName.c_str())) {
     Serial.println("[WiFi] Failed. Offline Mode.");
   } else {
-    Serial.println("[WiFi] Connected! test update");
+    Serial.println("[WiFi] Connected!");
     setClock();
     espClient.setCACert(root_ca);
     client.setServer(mqtt_server, mqtt_port);

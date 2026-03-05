@@ -1,5 +1,8 @@
-// API_URL is now managed by apiConfig.js
-// SECURITY: Escape HTML special chars before injecting DB values into innerHTML
+// ══════════════════════════════════════════
+// ADMIN COMMAND CENTER — JavaScript
+// ══════════════════════════════════════════
+
+// SECURITY: XSS Prevention
 function escapeHtml(str) {
     if (str == null) return '';
     return String(str)
@@ -10,115 +13,106 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
-// [HARDWARE] Pin Map matching Firmware (GPIOs)
+// Pin Map (Firmware GPIO)
 const PIN_MAP = [
-    { r: 22, s: 15 }, // Relay 1 & Switch 1 (Matches Code Index 0)
-    { r: 23, s: 16 }, // Relay 2 & Switch 2 (Matches Code Index 1)
-    { r: 14, s: 17 }, // Relay 3 & Switch 3 (Matches Code Index 2)
-    { r: 27, s: 5 }, // Relay 4 & Switch 4 (Matches Code Index 3)
-    { r: 26, s: 18 }, // Relay 5 & Switch 5 (Matches Code Index 4)
-    { r: 25, s: 19 }, // Relay 6 & Switch 6 (Matches Code Index 5)
-    { r: 33, s: 21 }, // Relay 7 & Switch 7 (Matches Code Index 6)
-    { r: 32, s: 34 }, // Relay 8 & Switch 8 (Matches Code Index 7)
-    { r: 4, s: 35 }  // Relay 9 & Switch 9 (Matches Code Index 8)
+    { r: 22, s: 15 }, { r: 23, s: 16 }, { r: 14, s: 17 },
+    { r: 27, s: 5 }, { r: 26, s: 18 }, { r: 25, s: 19 },
+    { r: 33, s: 21 }, { r: 32, s: 34 }, { r: 4, s: 35 }
 ];
 
-// 1. Get Token
+// ── Auth Check ──
 const token = localStorage.getItem('token');
-
-// GLOBAL FETCH INTERCEPTOR is now handled by app.js / apiConfig.js
-// 2. CHECK AUTH ON LOAD
 if (!token) {
-    alert("You must log in as an Admin first.");
+    alert("Admin login required.");
     window.location.href = 'index.html';
 } else {
-    // Hide auth overlay immediately if token exists
     const overlay = document.getElementById('auth-overlay');
     if (overlay) overlay.style.display = 'none';
-
-    // Initialize Dashboard
     loadData();
+    // Auto-refresh every 10 seconds
+    setInterval(loadData, 10000);
 }
 
-// 3. LOAD DASHBOARD DATA
+// ═══════════════════════════════════════════
+// CORE DATA LOADING
+// ═══════════════════════════════════════════
+
 async function loadData() {
     try {
-        // A. Fetch Stats
         const resStats = await fetch(`${API_URL}/admin/stats`, {
             headers: { 'x-access-token': token }
         });
 
-        // Security Check
         if (resStats.status === 403) {
-            alert("Access Denied: Your account is not an Admin.");
+            alert("Access Denied: Not an Admin account.");
             window.location.href = 'home.html';
             return;
         }
 
         const stats = await resStats.json();
-        document.getElementById('val-devices').innerText = stats.totalDevices || 0;
-        document.getElementById('val-users').innerText = stats.totalUsers || 0;
-        document.getElementById('val-online').innerText = stats.onlineDevices || 0;
-        document.getElementById('val-unsold').innerText = stats.unownedDevices || 0;
+        animateValue('val-devices', stats.totalDevices || 0);
+        animateValue('val-users', stats.totalUsers || 0);
+        animateValue('val-online', stats.onlineDevices || 0);
+        animateValue('val-unsold', stats.unownedDevices || 0);
 
-        // B. Fetch Devices
         const resDev = await fetch(`${API_URL}/admin/devices`, {
             headers: { 'x-access-token': token }
         });
         const devices = await resDev.json();
         renderTable(devices);
 
-        // C. OTA: Firmware History + Device Versions
         loadFirmwareHistory();
         loadDeviceVersions();
-
     } catch (err) {
-        console.error(err);
+        console.error('[Dashboard]', err);
     }
 }
 
-// 4. RENDER TABLE (With New UI)
+// Animated number counter
+function animateValue(elementId, target) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const current = parseInt(el.innerText) || 0;
+    if (current === target) return;
+    el.innerText = target;
+}
+
+// ═══════════════════════════════════════════
+// DEVICE INVENTORY TABLE
+// ═══════════════════════════════════════════
+
 function renderTable(devices) {
     const tbody = document.getElementById('device-table-body');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     devices.forEach(dev => {
         const tr = document.createElement('tr');
 
-        // Status Badge Logic
-        const onlineBadge = dev.isOnline
+        const statusBadge = dev.isOnline
             ? `<span class="badge online"><span class="badge-dot"></span>Online</span>`
             : `<span class="badge offline"><span class="badge-dot"></span>Offline</span>`;
-
-        // Owner Display Logic
-        const ownerDisplay = dev.owner
-            ? `<span style="font-weight:600; color:#111827;">👤 ${dev.owner.email}</span>`
-            : `<span style="color:#f59e0b; font-weight:600; font-size: 0.85rem; background: #fffbeb; padding: 2px 8px; border-radius: 4px; border: 1px solid #fcd34d;">Unsold</span>`;
 
         const safeDeviceId = escapeHtml(dev.deviceId);
         const safeSecretCode = escapeHtml(dev.secretCode);
         const safeEmail = dev.owner ? escapeHtml(dev.owner.email) : null;
         const channelCount = dev.switches ? dev.switches.length : 9;
 
+        const ownerCell = dev.owner
+            ? `<span style="font-weight:600; color:var(--text-primary);">👤 ${safeEmail}</span>
+               <div style="margin-top:3px;"><button onclick="unlinkUser('${safeDeviceId}')" style="font-size:0.7rem; color:var(--danger); border:none; background:none; cursor:pointer; text-decoration:underline;">Unlink</button></div>`
+            : `<span style="color:var(--warning); font-weight:700; font-size:0.75rem; background:rgba(251,191,36,0.1); padding:3px 8px; border-radius:4px; border:1px solid rgba(251,191,36,0.2);">UNSOLD</span>`;
+
         tr.innerHTML = `
-            <td>${onlineBadge}</td>
-            <td style="font-family:'Courier New', monospace; font-weight:600; color:#4b5563;">${safeDeviceId}</td>
-            <td style="font-family:'Courier New', monospace; letter-spacing:1px;">${safeSecretCode}</td>
-            <td>
-                ${dev.owner
-                ? `<span style="font-weight:600; color:#111827;">👤 ${safeEmail}</span>`
-                : `<span style="color:#f59e0b; font-weight:600; font-size: 0.85rem; background: #fffbeb; padding: 2px 8px; border-radius: 4px; border: 1px solid #fcd34d;">Unsold</span>`}
-                ${dev.owner ? `<div style="margin-top:4px;"><button onclick="unlinkUser('${safeDeviceId}')" style="font-size:0.75rem; color:#ef4444; border:none; background:none; cursor:pointer; text-decoration: underline;">Unlink User</button></div>` : ''}
-            </td>
+            <td>${statusBadge}</td>
+            <td style="font-family:'JetBrains Mono','Courier New',monospace; font-weight:700; color:var(--cyan); font-size:0.82rem;">${safeDeviceId}</td>
+            <td style="font-family:'JetBrains Mono','Courier New',monospace; letter-spacing:1px; color:var(--text-muted);">${safeSecretCode}</td>
+            <td>${ownerCell}</td>
             <td style="text-align: right;">
-                <button class="btn-small" style="background:#f59e0b; color:white;" onclick="openEditModal('${safeDeviceId}', ${channelCount})" title="Edit Channels"><i class="fa-solid fa-gear"></i></button>
-                <button class="btn-small" style="background:#f59e0b; color:white;" onclick='openInvertModal(${JSON.stringify(dev)})' title="Fix Inverted Logic">
-                    <i class="fa-solid fa-repeat"></i>
-                </button>
-                <button class="btn-small" style="background:#6366f1; color:white;" onclick="showPins(${channelCount})" title="View Pinout"><i class="fa-solid fa-microchip"></i></button>
-                <button class="btn-small btn-qr" onclick='showQr(${JSON.stringify(dev)})' title="Get QR">
-                    <i class="fa-solid fa-qrcode"></i>
-                </button>
+                <button class="btn-small" style="color:var(--warning); border-color:rgba(251,191,36,0.2);" onclick="openEditModal('${safeDeviceId}', ${channelCount})" title="Edit"><i class="fa-solid fa-gear"></i></button>
+                <button class="btn-small" style="color:var(--warning); border-color:rgba(251,191,36,0.2);" onclick='openInvertModal(${JSON.stringify(dev)})' title="Invert Logic"><i class="fa-solid fa-repeat"></i></button>
+                <button class="btn-small" style="color:var(--cyan); border-color:rgba(34,211,238,0.2);" onclick="showPins(${channelCount})" title="Pinout"><i class="fa-solid fa-microchip"></i></button>
+                <button class="btn-small btn-qr" onclick='showQr(${JSON.stringify(dev)})' title="QR Code"><i class="fa-solid fa-qrcode"></i></button>
                 <button class="btn-small btn-del" onclick="deleteDevice('${safeDeviceId}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
             </td>
         `;
@@ -126,50 +120,37 @@ function renderTable(devices) {
     });
 }
 
-// 5. CREATE DEVICE LOGIC
+// ═══════════════════════════════════════════
+// DEVICE CRUD
+// ═══════════════════════════════════════════
+
 function openCreateModal() {
     document.getElementById('new-secret-code').value = Math.floor(100000 + Math.random() * 900000);
     document.getElementById('create-modal').style.display = 'flex';
 }
-
-function closeCreateModal() {
-    document.getElementById('create-modal').style.display = 'none';
-}
+function closeCreateModal() { document.getElementById('create-modal').style.display = 'none'; }
 
 async function submitCreateDevice() {
     const deviceId = document.getElementById('new-device-id').value;
     const secretCode = document.getElementById('new-secret-code').value;
-    const channels = document.getElementById('new-channels').value; // Get channel count
-
+    const channels = document.getElementById('new-channels').value;
     if (!deviceId) return alert("Device ID is required");
 
     try {
         const res = await fetch(`${API_URL}/admin/create`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-access-token': token
-            },
-            body: JSON.stringify({ deviceId, secretCode, channels }) // Send channels to backend
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            body: JSON.stringify({ deviceId, secretCode, channels })
         });
-
         const data = await res.json();
         if (res.ok) {
             closeCreateModal();
             loadData();
-            const tempDev = {
-                deviceId,
-                secretCode,
-                switches: new Array(parseInt(channels)).fill({ inverted: false })
-            };
-            showQr(tempDev);
-        } else {
-            alert(data.error);
-        }
+            showQr({ deviceId, secretCode, switches: new Array(parseInt(channels)).fill({ inverted: false }) });
+        } else { alert(data.error); }
     } catch (err) { alert("Error creating device"); }
 }
 
-// 6. EDIT CONFIGURATION LOGIC
 function openEditModal(deviceId, currentChannels) {
     document.getElementById('edit-device-id').value = deviceId;
     document.getElementById('edit-channels').value = currentChannels;
@@ -179,24 +160,17 @@ function openEditModal(deviceId, currentChannels) {
 async function submitEditChannels() {
     const deviceId = document.getElementById('edit-device-id').value;
     const channels = document.getElementById('edit-channels').value;
-
     try {
         const res = await fetch(`${API_URL}/admin/device/channels`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-access-token': token },
             body: JSON.stringify({ deviceId, channels })
         });
-
-        if (res.ok) {
-            document.getElementById('edit-modal').style.display = 'none';
-            loadData();
-        } else {
-            alert("Update Failed");
-        }
+        if (res.ok) { document.getElementById('edit-modal').style.display = 'none'; loadData(); }
+        else { alert("Update Failed"); }
     } catch (err) { alert("Server Error"); }
 }
 
-// 7. UNLINK USER LOGIC
 async function unlinkUser(id) {
     if (!confirm(`Remove user from ${id}? Device will be reset.`)) return;
     try {
@@ -209,24 +183,23 @@ async function unlinkUser(id) {
     } catch (err) { alert("Action failed"); }
 }
 
-// 8. DELETE DEVICE LOGIC
 async function deleteDevice(id) {
-    if (!confirm(`Permanently delete ${id}? This cannot be undone.`)) return;
+    if (!confirm(`Permanently delete ${id}?`)) return;
     try {
         const res = await fetch(`${API_URL}/admin/device/${id}`, {
-            method: 'DELETE',
-            headers: { 'x-access-token': token }
+            method: 'DELETE', headers: { 'x-access-token': token }
         });
         if (res.ok) loadData();
     } catch (err) { alert("Delete failed"); }
 }
 
-// 9. DYNAMIC PINOUT DISPLAY
+// ═══════════════════════════════════════════
+// PINOUT & QR
+// ═══════════════════════════════════════════
+
 function showPins(count) {
     const tbody = document.getElementById('pin-table-body');
     tbody.innerHTML = '';
-
-    // Only loop up to the specific device's channel count
     for (let i = 0; i < count; i++) {
         const pin = PIN_MAP[i];
         if (pin) {
@@ -234,171 +207,93 @@ function showPins(count) {
                 <tr>
                     <td><b>${i + 1}</b></td>
                     <td>GPIO ${pin.r}</td>
-                    <td>GPIO ${pin.s} ${i === 8 ? '<span style="color:#ef4444; font-size:0.7em;">(No Pullup)</span>' : ''}</td>
+                    <td>GPIO ${pin.s} ${i === 8 ? '<span style="color:var(--danger); font-size:0.65em;">(No Pullup)</span>' : ''}</td>
                 </tr>`;
         }
     }
     document.getElementById('pin-modal').style.display = 'flex';
 }
 
-// 10. QR CODE LOGIC
-// --- UPDATED renderTable line (Update only this button line) ---
-// Change the showQr call to: onclick='showQr(${JSON.stringify(dev)})'
-
 function showQr(dev) {
     const qrArea = document.getElementById('qr-print-area');
     const qrDiv = document.getElementById('qrcode');
     const qrText = document.getElementById('qr-text');
     const hardwareTable = document.getElementById('qr-hardware-table');
-
     if (!qrArea || !qrDiv || !hardwareTable) return;
 
     qrDiv.innerHTML = "";
-    // SECURITY: Escape all DB-sourced values before injecting into HTML
     qrText.innerHTML = `
-        <div style="font-size: 1.4rem; font-weight: bold; margin-bottom: 5px;">Device ID: ${escapeHtml(dev.deviceId)}</div>
-        <div style="font-size: 1.2rem; color: #374151;">Secret Code: ${escapeHtml(dev.secretCode)}</div>
+        <div style="font-size: 1.3rem; font-weight: bold; margin-bottom: 5px;">Device: ${escapeHtml(dev.deviceId)}</div>
+        <div style="font-size: 1rem; color: var(--text-secondary);">Code: ${escapeHtml(dev.secretCode)}</div>
     `;
 
     const payload = JSON.stringify({ id: dev.deviceId, code: dev.secretCode });
     new QRCode(qrDiv, { text: payload, width: 120, height: 120 });
 
-    const switches = dev.switches || [];
-    const channelCount = switches.length > 0 ? switches.length : 9;
+    const channelCount = dev.switches?.length || 9;
 
-    // Build the restructured content
     let htmlContent = `
-        <div style="text-align: left; font-family: sans-serif; margin-top: 20px;">
-            
-            <div style="background: #f3f4f6; padding: 8px; border-radius: 6px; margin-bottom: 15px; font-weight: 600;">
-                Hardware Profile: ${channelCount} Relays / ${channelCount} Switches 
+        <div style="text-align: left; font-family: sans-serif; margin-top: 20px; color: var(--text-primary);">
+            <div style="background: var(--bg-glass); padding: 8px; border-radius: 6px; margin-bottom: 15px; font-weight: 600; border: 1px solid var(--border);">
+                Hardware: ${channelCount} Relays / ${channelCount} Switches
+            </div>
+            <div style="margin-bottom: 15px; color: var(--text-secondary);">
+                <strong>Sensor:</strong> DHT11 (Temp & Humidity) on GPIO 13
             </div>
 
-            <div style="margin-bottom: 15px;">
-                <strong>Active Sensors:</strong> 1 (DHT11 Temperature & Humidity) [cite: 9, 10]
-            </div>
-
-            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">4. Power Supply (ESP32)</h4>
-            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
-                <tr style="background:#eee;">
-                    <th style="border: 1px solid #000; padding: 4px;">Device</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Positive (+) Pin</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Negative (-) Pin</th>
-                </tr>
-                <tr>
-                    <td style="border: 1px solid #000; padding: 4px;">ESP32 NodeMCU</td>
-                    <td style="border: 1px solid #000; padding: 4px;">VIN / 5V </td>
-                    <td style="border: 1px solid #000; padding: 4px;">GND </td>
-                </tr>
-            </table>
-
-            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">5. Sensor Pin Connections</h4>
-            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
-                <tr style="background:#eee;">
-                    <th style="border: 1px solid #000; padding: 4px;">Sensor Name</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Total Pins</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Sensor Pin</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Connect to ESP32</th>
-                </tr>
-                <tr>
-                    <td rowspan="3" style="border: 1px solid #000; padding: 4px;">DHT11 </td>
-                    <td rowspan="3" style="border: 1px solid #000; padding: 4px; text-align:center;">3 / 4</td>
-                    <td style="border: 1px solid #000; padding: 4px;">VCC</td>
-                    <td style="border: 1px solid #000; padding: 4px;">3.3V</td>
-                </tr>
-                <tr>
-                    <td style="border: 1px solid #000; padding: 4px;">DATA</td>
-                    <td style="border: 1px solid #000; padding: 4px;">GPIO 13 </td>
-                </tr>
-                <tr>
-                    <td style="border: 1px solid #000; padding: 4px;">GND</td>
-                    <td style="border: 1px solid #000; padding: 4px;">GND </td>
-                </tr>
-            </table>
-
-            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">6. External Resistor Requirements</h4>
-            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
-                <tr style="background:#eee;">
-                    <th style="border: 1px solid #000; padding: 4px;">Resistor Value</th>
-                    <th style="border: 1px solid #000; padding: 4px;">ESP32 Pin 1</th>
-                    <th style="border: 1px solid #000; padding: 4px;">ESP32 Pin 2 (Pull-Up)</th>
-                </tr>
-                <tr>
-                    <td style="border: 1px solid #000; padding: 4px;">10K Ohm [cite: 13]</td>
-                    <td style="border: 1px solid #000; padding: 4px;">GPIO 34 </td>
-                    <td style="border: 1px solid #000; padding: 4px;">3.3V Pin</td>
-                </tr>
-                <tr>
-                    <td style="border: 1px solid #000; padding: 4px;">10K Ohm [cite: 13]</td>
-                    <td style="border: 1px solid #000; padding: 4px;">GPIO 35 [cite: 13]</td>
-                    <td style="border: 1px solid #000; padding: 4px;">3.3V Pin</td>
-                </tr>
-            </table>
-
-            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">7. Relay Module Connections</h4>
-            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
-                <tr style="background:#eee;">
-                    <th style="border: 1px solid #000; padding: 4px;">Channel</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Relay VCC</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Relay GND</th>
-                    <th style="border: 1px solid #000; padding: 4px;">IN Pin to ESP32</th>
+            <h4 style="font-size: 11px; margin-bottom: 5px; border-bottom: 1px solid var(--border); padding-bottom: 4px; color: var(--text-secondary);">Relay Connections</h4>
+            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px; color: var(--text-secondary);">
+                <tr style="background:rgba(255,255,255,0.03);">
+                    <th style="border: 1px solid var(--border); padding: 4px;">Channel</th>
+                    <th style="border: 1px solid var(--border); padding: 4px;">GPIO</th>
                 </tr>`;
 
     for (let i = 0; i < channelCount; i++) {
-        htmlContent += `
-            <tr>
-                <td style="border: 1px solid #000; padding: 4px; font-weight:bold;">Relay ${i + 1}</td>
-                <td style="border: 1px solid #000; padding: 4px;">5V</td>
-                <td style="border: 1px solid #000; padding: 4px;">GND</td>
-                <td style="border: 1px solid #000; padding: 4px;">GPIO ${PIN_MAP[i].r} </td>
-            </tr>`;
+        htmlContent += `<tr>
+            <td style="border: 1px solid var(--border); padding: 4px; font-weight:bold;">Relay ${i + 1}</td>
+            <td style="border: 1px solid var(--border); padding: 4px;">GPIO ${PIN_MAP[i].r}</td>
+        </tr>`;
     }
 
-    htmlContent += `
-            </table>
+    htmlContent += `</table>
 
-            <h4 style="font-size: 12px; margin-bottom: 5px; border-bottom: 1px solid #000;">8. Switch (Manual) Connections</h4>
-            <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px;">
-                <tr style="background:#eee;">
-                    <th style="border: 1px solid #000; padding: 4px;">Channel</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Switch Pin 1</th>
-                    <th style="border: 1px solid #000; padding: 4px;">Switch Pin 2</th>
-                </tr>`;
+        <h4 style="font-size: 11px; margin-bottom: 5px; border-bottom: 1px solid var(--border); padding-bottom: 4px; color: var(--text-secondary);">Switch Connections</h4>
+        <table style="width:100%; border-collapse: collapse; font-size: 10px; margin-bottom: 15px; color: var(--text-secondary);">
+            <tr style="background:rgba(255,255,255,0.03);">
+                <th style="border: 1px solid var(--border); padding: 4px;">Channel</th>
+                <th style="border: 1px solid var(--border); padding: 4px;">GPIO</th>
+            </tr>`;
 
     for (let i = 0; i < channelCount; i++) {
-        htmlContent += `
-            <tr>
-                <td style="border: 1px solid #000; padding: 4px; font-weight:bold;">Switch ${i + 1}</td>
-                <td style="border: 1px solid #000; padding: 4px;">GPIO ${PIN_MAP[i].s} </td>
-                <td style="border: 1px solid #000; padding: 4px;">GND</td>
-            </tr>`;
+        htmlContent += `<tr>
+            <td style="border: 1px solid var(--border); padding: 4px; font-weight:bold;">Switch ${i + 1}</td>
+            <td style="border: 1px solid var(--border); padding: 4px;">GPIO ${PIN_MAP[i].s}</td>
+        </tr>`;
     }
 
-    htmlContent += `
-            </table>
-            <p style="font-size: 9px; font-style: italic;">* Note: GPIO 34 & 35 do not have internal pull-ups. Resistor must bridge GPIO to 3.3V. [cite: 13]</p>
-        </div>`;
+    htmlContent += `</table>
+        <p style="font-size: 9px; font-style: italic; color: var(--text-muted);">* GPIO 34 & 35 need external 10K pull-up to 3.3V</p>
+    </div>`;
 
     hardwareTable.innerHTML = htmlContent;
     qrArea.style.display = 'block';
 }
 
-function closeQr() {
-    document.getElementById('qr-print-area').style.display = 'none';
-}
+function closeQr() { document.getElementById('qr-print-area').style.display = 'none'; }
 
+// ═══════════════════════════════════════════
+// LOGIC INVERSION
+// ═══════════════════════════════════════════
 
-// 13. LOGIC INVERSION UI FUNCTIONS
 function openInvertModal(device) {
     const tbody = document.getElementById('invert-table-body');
     tbody.innerHTML = '';
-
     device.switches.forEach(sw => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>
-                <div style="font-weight:600;">${escapeHtml(sw.name)}</div>
-                <div style="font-size:0.7rem; color:#999;">ID: ${escapeHtml(String(sw.id))}</div>
+                <div style="font-weight:600; color:var(--text-primary);">${escapeHtml(sw.name)}</div>
+                <div style="font-size:0.68rem; color:var(--text-muted);">ID: ${escapeHtml(String(sw.id))}</div>
             </td>
             <td style="text-align: right;">
                 <label class="switch-toggle">
@@ -410,7 +305,6 @@ function openInvertModal(device) {
         `;
         tbody.appendChild(tr);
     });
-
     document.getElementById('invert-modal').style.display = 'flex';
 }
 
@@ -418,44 +312,21 @@ async function toggleInversion(deviceId, switchId, isInverted) {
     try {
         const res = await fetch(`${API_URL}/admin/device/invert-logic`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-access-token': token
-            },
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
             body: JSON.stringify({ deviceId, switchId, inverted: isInverted })
         });
-
-        if (res.ok) {
-            console.log(`Switch ${switchId} inversion set to ${isInverted}`);
-            // Refresh main table data to keep current state in memory
-            loadData();
-        } else {
-            alert("Failed to update inversion logic");
-        }
-    } catch (err) {
-        alert("Server Error while updating logic");
-    }
+        if (res.ok) loadData();
+        else alert("Failed to update");
+    } catch (err) { alert("Server Error"); }
 }
 
-// 11. LOGOUT
-function logout() {
-    logoutThisDevice();
-}
+// ═══════════════════════════════════════════
+// LOGOUT
+// ═══════════════════════════════════════════
 
-function openLogoutModal() {
-    const modal = document.getElementById('logout-modal');
-    if (modal) modal.style.display = 'flex';
-}
-
-function closeLogoutModal() {
-    const modal = document.getElementById('logout-modal');
-    if (modal) modal.style.display = 'none';
-}
-
-function logoutThisDevice() {
-    localStorage.removeItem('token');
-    window.location.href = 'index.html';
-}
+function openLogoutModal() { const m = document.getElementById('logout-modal'); if (m) m.style.display = 'flex'; }
+function closeLogoutModal() { const m = document.getElementById('logout-modal'); if (m) m.style.display = 'none'; }
+function logoutThisDevice() { localStorage.removeItem('token'); window.location.href = 'index.html'; }
 
 async function logoutAllDevices() {
     try {
@@ -463,31 +334,21 @@ async function logoutAllDevices() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-access-token': token }
         });
-    } catch (err) {
-        console.error("Logout all failed", err);
-    } finally {
-        logoutThisDevice();
-    }
+    } catch (err) { console.error("Logout all failed"); }
+    finally { logoutThisDevice(); }
 }
 
-// 12. OVERLAY AUTH HANDLER (Optional if button exists)
 function adminLogin() {
-    // This button is just a visual trigger in the HTML
-    // The actual auth check happens at the top of this file (Section 2)
-    // If we are here, we are already logged in or the token is missing
     if (token) {
         document.getElementById('auth-overlay').style.display = 'none';
         loadData();
-    } else {
-        window.location.href = 'index.html';
-    }
+    } else { window.location.href = 'index.html'; }
 }
 
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════
 // OTA FIRMWARE MANAGEMENT
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════
 
-// Cache device list for checklists
 let _allDevicesCache = [];
 
 function formatDate(dateStr) {
@@ -497,7 +358,7 @@ function formatDate(dateStr) {
         + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 }
 
-// 14. FIRMWARE HISTORY
+// ── FIRMWARE HISTORY TABLE ──
 async function loadFirmwareHistory() {
     try {
         const res = await fetch(`${API_URL}/admin/firmware`, {
@@ -506,9 +367,7 @@ async function loadFirmwareHistory() {
         if (!res.ok) return;
         const releases = await res.json();
         renderFirmwareTable(releases);
-    } catch (err) {
-        console.error('[OTA] Failed to load firmware history', err);
-    }
+    } catch (err) { console.error('[OTA] Load error', err); }
 }
 
 function renderFirmwareTable(releases) {
@@ -516,7 +375,7 @@ function renderFirmwareTable(releases) {
     if (!tbody) return;
 
     if (!releases.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">No firmware releases yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:30px;">No firmware releases yet</td></tr>';
         return;
     }
 
@@ -524,30 +383,58 @@ function renderFirmwareTable(releases) {
     releases.forEach(fw => {
         const tr = document.createElement('tr');
         const targetLabel = fw.targetType === 'all'
-            ? 'All Devices'
-            : `${fw.targetDevices.length} device(s)`;
+            ? '<span style="color:var(--text-secondary);">All Devices</span>'
+            : `<span style="color:var(--text-secondary);">${fw.targetDevices.length} device(s)</span>`;
 
         const canRollback = (fw.status === 'active' || fw.status === 'rolled_back') && fw.localFilename;
+        const canCancel = fw.status === 'scheduled';
+
+        let actions = '—';
+        if (canCancel) {
+            actions = `
+                <button class="btn-cancel-fw" onclick="cancelScheduledUpdate('${fw._id}', '${escapeHtml(fw.version)}')" title="Cancel this update">
+                    <i class="fa-solid fa-ban"></i> Stop
+                </button>`;
+        } else if (canRollback) {
+            actions = `
+                <button class="btn-rollback" onclick="openRollbackModal('${fw._id}', '${escapeHtml(fw.version)}')" title="Rollback">
+                    <i class="fa-solid fa-rotate-left"></i> Rollback
+                </button>`;
+        }
 
         tr.innerHTML = `
             <td><span class="fw-version">v${escapeHtml(fw.version)}</span></td>
             <td><span class="fw-badge ${escapeHtml(fw.status)}">${escapeHtml(fw.status.replace('_', ' '))}</span></td>
-            <td style="font-size:0.85rem; color:#6b7280;">${formatDate(fw.scheduledAt)}</td>
-            <td style="font-size:0.85rem; color:#6b7280;">${formatDate(fw.releasedAt)}</td>
-            <td style="font-size:0.85rem;">${targetLabel}</td>
-            <td style="text-align: right;">
-                ${canRollback
-                ? `<button class="btn-rollback" onclick="openRollbackModal('${fw._id}', '${escapeHtml(fw.version)}')" title="Rollback to this version">
-                        <i class="fa-solid fa-rotate-left"></i> Rollback
-                       </button>`
-                : '—'}
-            </td>
+            <td style="font-size:0.8rem; color:var(--text-muted);">${formatDate(fw.scheduledAt)}</td>
+            <td style="font-size:0.8rem; color:var(--text-muted);">${formatDate(fw.releasedAt)}</td>
+            <td style="font-size:0.8rem;">${targetLabel}</td>
+            <td style="text-align: right;">${actions}</td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-// 15. DEVICE VERSION TRACKING
+// ── CANCEL SCHEDULED UPDATE ──
+async function cancelScheduledUpdate(firmwareId, version) {
+    if (!confirm(`Stop scheduled update v${version}?`)) return;
+    try {
+        const res = await fetch(`${API_URL}/admin/firmware/cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            body: JSON.stringify({ firmwareId })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            loadFirmwareHistory();
+            loadDeviceVersions();
+            alert(`Update v${version} cancelled.`);
+        } else {
+            alert(data.error || 'Cancel failed');
+        }
+    } catch (err) { alert('Server Error'); }
+}
+
+// ── DEVICE VERSION TRACKING (Card Grid) ──
 async function loadDeviceVersions() {
     try {
         const res = await fetch(`${API_URL}/admin/device-versions`, {
@@ -555,64 +442,82 @@ async function loadDeviceVersions() {
         });
         if (!res.ok) return;
         const devices = await res.json();
-        _allDevicesCache = devices; // Cache for checklists
-        renderVersionTable(devices);
-    } catch (err) {
-        console.error('[OTA] Failed to load device versions', err);
-    }
+        _allDevicesCache = devices;
+        renderVersionCards(devices);
+    } catch (err) { console.error('[OTA] Version load error', err); }
 }
 
-function renderVersionTable(devices) {
-    const tbody = document.getElementById('version-table-body');
-    if (!tbody) return;
+function renderVersionCards(devices) {
+    const container = document.getElementById('version-grid-container');
+    const countLabel = document.getElementById('version-count-label');
+    if (!container) return;
+
+    if (countLabel) {
+        const online = devices.filter(d => d.isOnline).length;
+        countLabel.textContent = `${devices.length} devices • ${online} online`;
+    }
 
     if (!devices.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999; padding:20px;">No devices registered</td></tr>';
+        container.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:30px;">No devices registered</div>';
         return;
     }
 
-    tbody.innerHTML = '';
+    container.innerHTML = '';
     devices.forEach(dev => {
-        const tr = document.createElement('tr');
-        const statusBadge = dev.isOnline
-            ? `<span class="badge online"><span class="badge-dot"></span>Online</span>`
-            : `<span class="badge offline"><span class="badge-dot"></span>Offline</span>`;
+        const isOnline = dev.isOnline;
+        const card = document.createElement('div');
+        card.className = 'version-card';
 
         const pending = dev.pendingUpdate
-            ? `<span class="fw-badge scheduled">v${escapeHtml(dev.pendingUpdate.version)} queued</span>`
-            : '—';
+            ? `<span class="fw-badge scheduled" style="font-size:0.62rem;">v${escapeHtml(dev.pendingUpdate.version)} queued</span>`
+            : '';
 
-        tr.innerHTML = `
-            <td>${statusBadge}</td>
-            <td style="font-family:'Courier New', monospace; font-weight:600; color:#4b5563;">${escapeHtml(dev.deviceId)}</td>
-            <td><span class="fw-version">${escapeHtml(dev.firmwareVersion || 'unknown')}</span></td>
-            <td>${pending}</td>
+        card.innerHTML = `
+            <div class="version-card-icon ${isOnline ? 'online' : 'offline'}">
+                <i class="fa-solid ${isOnline ? 'fa-wifi' : 'fa-power-off'}"></i>
+            </div>
+            <div class="version-card-info">
+                <div class="version-card-id">${escapeHtml(dev.deviceId)}</div>
+                <div class="version-card-meta">
+                    <span class="fw-version" style="font-size:0.78rem;">v${escapeHtml(dev.firmwareVersion || '?.?.?')}</span>
+                    ${pending}
+                    <span class="badge ${isOnline ? 'online' : 'offline'}" style="font-size:0.62rem; padding:2px 7px;">
+                        <span class="badge-dot" style="width:4px;height:4px;margin-right:4px;"></span>${isOnline ? 'ON' : 'OFF'}
+                    </span>
+                </div>
+            </div>
         `;
-        tbody.appendChild(tr);
+        container.appendChild(card);
     });
 }
 
-// 16. SCHEDULE UPDATE MODAL
+// ═══════════════════════════════════════════
+// SCHEDULE UPDATE MODAL
+// ═══════════════════════════════════════════
+
+function toLocalISOString(date) {
+    const off = date.getTimezoneOffset();
+    const local = new Date(date.getTime() - off * 60000);
+    return local.toISOString().slice(0, 16);
+}
+
 function openScheduleModal() {
-    // Set default date to now + 5 minutes
     const now = new Date();
-    now.setMinutes(now.getMinutes() + 5);
-    const local = now.toISOString().slice(0, 16);
-    document.getElementById('ota-schedule-date').value = local;
-
-    // Populate device checklist
+    const minDate = new Date(now.getTime() + 60 * 1000); // Now + 1 minute
+    const dateInput = document.getElementById('ota-schedule-date');
+    dateInput.value = toLocalISOString(minDate);
+    dateInput.min = toLocalISOString(now); // Can't go earlier than now
+    document.getElementById('ota-version').value = '';
+    document.getElementById('ota-github-url').value = '';
     populateDeviceChecklist('ota-device-checklist', _allDevicesCache);
-
     document.getElementById('schedule-modal').style.display = 'flex';
 }
 
-function closeScheduleModal() {
-    document.getElementById('schedule-modal').style.display = 'none';
-}
+function closeScheduleModal() { document.getElementById('schedule-modal').style.display = 'none'; }
 
 function toggleOtaDeviceList() {
-    const selected = document.querySelector('input[name="ota-target"]:checked').value;
-    document.getElementById('ota-device-select-container').style.display = selected === 'specific' ? 'block' : 'none';
+    const val = document.querySelector('input[name="ota-target"]:checked').value;
+    document.getElementById('ota-device-select-container').style.display = val === 'specific' ? 'block' : 'none';
 }
 
 async function submitScheduleUpdate() {
@@ -621,14 +526,17 @@ async function submitScheduleUpdate() {
     const scheduledAt = document.getElementById('ota-schedule-date').value;
     const targetType = document.querySelector('input[name="ota-target"]:checked').value;
 
-    if (!version || !githubUrl || !scheduledAt) {
-        return alert('Please fill all required fields');
+    if (!version || !githubUrl || !scheduledAt) return alert('Please fill all required fields');
+
+    // Block scheduling in the past
+    if (new Date(scheduledAt) <= new Date()) {
+        return alert('Release time must be in the future');
     }
 
     let targetDevices = [];
     if (targetType === 'specific') {
         targetDevices = getCheckedDevices('ota-device-checklist');
-        if (!targetDevices.length) return alert('Please select at least one device');
+        if (!targetDevices.length) return alert('Select at least one device');
     }
 
     try {
@@ -636,28 +544,24 @@ async function submitScheduleUpdate() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-access-token': token },
             body: JSON.stringify({
-                version,
-                githubUrl,
+                version, githubUrl,
                 scheduledAt: new Date(scheduledAt).toISOString(),
-                targetType,
-                targetDevices
+                targetType, targetDevices
             })
         });
-
         const data = await res.json();
         if (res.ok) {
             closeScheduleModal();
             loadFirmwareHistory();
-            alert(`Firmware v${version} scheduled successfully!`);
-        } else {
-            alert(data.error || 'Failed to schedule');
-        }
-    } catch (err) {
-        alert('Server Error');
-    }
+            alert(`Firmware v${version} scheduled!`);
+        } else { alert(data.error || 'Failed'); }
+    } catch (err) { alert('Server Error'); }
 }
 
-// 17. ROLLBACK MODAL
+// ═══════════════════════════════════════════
+// ROLLBACK MODAL
+// ═══════════════════════════════════════════
+
 function openRollbackModal(firmwareId, version) {
     document.getElementById('rollback-firmware-id').value = firmwareId;
     document.getElementById('rollback-version-label').textContent = 'v' + version;
@@ -666,8 +570,8 @@ function openRollbackModal(firmwareId, version) {
 }
 
 function toggleRollbackDeviceList() {
-    const selected = document.querySelector('input[name="rollback-target"]:checked').value;
-    document.getElementById('rollback-device-select-container').style.display = selected === 'specific' ? 'block' : 'none';
+    const val = document.querySelector('input[name="rollback-target"]:checked').value;
+    document.getElementById('rollback-device-select-container').style.display = val === 'specific' ? 'block' : 'none';
 }
 
 async function submitRollback() {
@@ -677,10 +581,10 @@ async function submitRollback() {
     let targetDevices = [];
     if (targetType === 'specific') {
         targetDevices = getCheckedDevices('rollback-device-checklist');
-        if (!targetDevices.length) return alert('Please select at least one device');
+        if (!targetDevices.length) return alert('Select at least one device');
     }
 
-    if (!confirm('Are you sure you want to rollback firmware?')) return;
+    if (!confirm('Execute firmware rollback?')) return;
 
     try {
         const res = await fetch(`${API_URL}/admin/firmware/rollback`, {
@@ -688,38 +592,36 @@ async function submitRollback() {
             headers: { 'Content-Type': 'application/json', 'x-access-token': token },
             body: JSON.stringify({ firmwareId, targetType, targetDevices })
         });
-
         const data = await res.json();
         if (res.ok) {
             document.getElementById('rollback-modal').style.display = 'none';
             loadFirmwareHistory();
             loadDeviceVersions();
             alert(`Rollback to ${data.version} initiated!`);
-        } else {
-            alert(data.error || 'Rollback failed');
-        }
-    } catch (err) {
-        alert('Server Error');
-    }
+        } else { alert(data.error || 'Rollback failed'); }
+    } catch (err) { alert('Server Error'); }
 }
 
-// 18. DEVICE CHECKLIST HELPERS
+// ═══════════════════════════════════════════
+// DEVICE CHECKLIST HELPERS
+// ═══════════════════════════════════════════
+
 function populateDeviceChecklist(containerId, devices) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
     if (!devices.length) {
-        container.innerHTML = '<div style="padding:10px; color:#999; text-align:center;">No devices found</div>';
+        container.innerHTML = '<div style="padding:12px; color:var(--text-muted); text-align:center;">No devices found</div>';
         return;
     }
 
     container.innerHTML = devices.map(dev => `
         <label class="ota-device-item">
             <input type="checkbox" value="${escapeHtml(dev.deviceId)}">
-            <span style="font-family:'Courier New',monospace; font-weight:600;">${escapeHtml(dev.deviceId)}</span>
+            <span style="font-family:'JetBrains Mono','Courier New',monospace; font-weight:700; font-size:0.8rem; color:var(--text-primary);">${escapeHtml(dev.deviceId)}</span>
             ${dev.isOnline
-            ? '<span class="badge online" style="margin-left:auto;"><span class="badge-dot"></span>Online</span>'
-            : '<span class="badge offline" style="margin-left:auto;"><span class="badge-dot"></span>Offline</span>'
+            ? '<span class="badge online" style="margin-left:auto; font-size:0.62rem; padding:2px 7px;"><span class="badge-dot" style="width:4px;height:4px;margin-right:3px;"></span>ON</span>'
+            : '<span class="badge offline" style="margin-left:auto; font-size:0.62rem; padding:2px 7px;"><span class="badge-dot" style="width:4px;height:4px;margin-right:3px;"></span>OFF</span>'
         }
         </label>
     `).join('');
