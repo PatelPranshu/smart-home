@@ -28,9 +28,8 @@ class NativeCache {
         this.cache = new Map();
         this.ttl = ttlSeconds * 1000;
     }
-    set(key, value, customTtlMs) {
-        const expiresMs = customTtlMs !== undefined ? customTtlMs : this.ttl;
-        this.cache.set(key, { data: value, expiry: Date.now() + expiresMs });
+    set(key, value) {
+        this.cache.set(key, { data: value, expiry: Date.now() + this.ttl });
     }
     get(key) {
         const item = this.cache.get(key);
@@ -107,8 +106,50 @@ async function queueGoogleReport(userIdStr, statesPayload) {
 const FIRMWARE_DIR = path.join(__dirname, 'firmware_cache');
 if (!fs.existsSync(FIRMWARE_DIR)) fs.mkdirSync(FIRMWARE_DIR, { recursive: true });
 
-
+const { Server } = require('socket.io');
 const app = express();
+const server = http.createServer(app);
+
+// SOCKET.IO SETUP
+const io = new Server(server, {
+    cors: { origin: "*", methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }
+});
+
+// Socket.io Authentication Middleware
+io.use((socket, next) => {
+    try {
+        const token = socket.handshake.auth?.token;
+        if (!token) return next(new Error('Authentication error'));
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        socket.user = verified;
+        next();
+    } catch (err) {
+        next(new Error('Authentication error'));
+    }
+});
+
+io.on('connection', (socket) => {
+    // Join a room named after the user's ID
+    socket.join(socket.user.id.toString());
+    console.log(`[Socket.io] Connected: User ${socket.user.id}`);
+});
+
+// Helper Function: Emit Real-Time Updates
+async function emitDeviceUpdates(userIdStr) {
+    try {
+        const devices = await Device.find({ owner: userIdStr }).lean();
+
+        // Inject fresh data into cache for 2 seconds
+        const cacheKey = `user_devices_${userIdStr}`;
+        deviceCache.set(cacheKey, devices);
+        setTimeout(() => deviceCache.delete(cacheKey), 2000);
+
+        io.to(userIdStr.toString()).emit('devices_updated', devices);
+    } catch (err) {
+        console.error('[Socket.io] Emitting devices failed:', err.message);
+    }
+}
+
 // LOGGING
 app.use(morgan('common'));
 
@@ -331,6 +372,11 @@ mqttClient.on('message', async (topic, message) => {
             // Invalidate cache for this device
             deviceCache.delete(deviceId);
 
+            // EMIT REAL-TIME UPDATE
+            if (device && device.owner) {
+                emitDeviceUpdates(device.owner._id ? device.owner._id.toString() : device.owner.toString());
+            }
+
             // BACKGROUND TASKS: Run History and Google reporting via queue
             BackgroundTaskQueue.enqueue(async () => {
                 // Log to History
@@ -377,21 +423,26 @@ mqttClient.on('message', async (topic, message) => {
             const status = message.toString().trim();
             const isOnline = status === 'online';
 
-            // BUG FIX: Avoid stale reads during rapid reconnects by updating DB FIRST
+            // IMPORTANT USER FIX: Execute Update FIRST to prevent stale reads
             const updateResult = await Device.updateOne(
-                { deviceId: deviceId },
+                { deviceId: deviceId, isOnline: { $ne: isOnline } },
                 { $set: { isOnline: isOnline } }
             );
 
             if (updateResult.modifiedCount > 0) {
                 console.log(`Device ${deviceId} is now ${status}`);
-
                 deviceCache.delete(deviceId); // Invalidate cache
+
+                // Fetch freshly updated device
                 const device = await Device.findOne({ deviceId }).lean();
-                if (device) deviceCache.set(deviceId, device);
+                if (!device) return;
+
+                if (device.owner) {
+                    emitDeviceUpdates(device.owner.toString());
+                }
 
                 // OTA: If device just came online and has a pending update, push it
-                if (isOnline && device && device.pendingUpdate) {
+                if (isOnline && device.pendingUpdate) {
                     (async () => {
                         try {
                             const fw = await Firmware.findById(device.pendingUpdate).lean();
@@ -436,19 +487,26 @@ mqttClient.on('message', async (topic, message) => {
         // -------------------------------------------------
         else if (type === 'sensor') {
             const data = JSON.parse(message.toString());
-
-            // 1. Instantly update cache so frontend sees it polling
-            const cachedDevice = deviceCache.get(deviceId);
-            if (cachedDevice) {
-                cachedDevice.temperature = data.temp;
-                cachedDevice.humidity = data.hum;
-            }
-
-            // 2. Throttle DB writes to max once every 60 seconds per device
-            if (!global.sensorLastWritten) global.sensorLastWritten = {};
             const now = Date.now();
 
-            if (!global.sensorLastWritten[deviceId] || now - global.sensorLastWritten[deviceId] > 60000) {
+            // 1. Instantly update deviceCache so frontend sees it immediately and Emit
+            let device = deviceCache.get(deviceId);
+            if (device) {
+                device.temperature = data.temp;
+                device.humidity = data.hum;
+                deviceCache.set(deviceId, device); // Keep alive
+                if (device.owner) emitDeviceUpdates(device.owner.toString());
+            } else {
+                Device.findOne({ deviceId }).select('owner').lean().then(d => {
+                    if (d && d.owner) emitDeviceUpdates(d.owner.toString());
+                }).catch(() => { });
+            }
+
+            // 2. Throttle MongoDB writes (max once per 60s per device)
+            if (!global.sensorLastWritten) global.sensorLastWritten = {};
+            const lastWritten = global.sensorLastWritten[deviceId] || 0;
+
+            if (now - lastWritten > 60000) {
                 global.sensorLastWritten[deviceId] = now;
                 await Device.updateOne(
                     { deviceId: deviceId },
@@ -702,9 +760,12 @@ app.get('/api/devices', auth, async (req, res) => {
         if (!devices) {
             // .lean() makes this query much faster for production
             devices = await Device.find({ owner: req.user.id }).lean();
-            // Cache for exactly 2 seconds to relieve frontend polling bottleneck
-            deviceCache.set(cacheKey, devices, 2000);
+
+            // Explicitly cache it for exactly 2 seconds
+            deviceCache.set(cacheKey, devices);
+            setTimeout(() => deviceCache.delete(cacheKey), 2000);
         }
+
         res.json(devices);
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch devices" });
@@ -828,6 +889,9 @@ app.post('/api/control', auth, [
             { $set: updateFields }
         );
 
+        // EMIT REAL-TIME UPDATE
+        emitDeviceUpdates(req.user.id.toString());
+
         // Queue History Log
         BackgroundTaskQueue.enqueue(async () => {
             await History.create({
@@ -887,6 +951,9 @@ app.post('/api/fan-speed', auth, [
             { deviceId, "switches.id": switchId },
             { $set: updateFields }
         );
+
+        // EMIT REAL-TIME UPDATE
+        emitDeviceUpdates(req.user.id.toString());
 
         // Respond immediately
         res.json({ status: 'sent', speed });
@@ -1651,28 +1718,27 @@ app.post('/api/smarthome', auth, async (req, res) => {
         // Group switches by deviceId to minimize DB hits
         const uniqueDeviceIds = [...new Set(requestedDevices.map(d => d.id.split('-')[0]))];
 
-        // 1. Check deviceCache first
-        const devices = [];
+        // OPTIMIZATION: Check deviceCache first for zero-lag Google Home responses
+        const deviceMap = {};
         const missingIds = [];
-        for (const id of uniqueDeviceIds) {
-            const cached = deviceCache.get(id);
+
+        for (const devId of uniqueDeviceIds) {
+            const cached = deviceCache.get(devId);
             if (cached && cached.owner && cached.owner.toString() === userId) {
-                devices.push(cached);
+                deviceMap[devId] = cached;
             } else {
-                missingIds.push(id);
+                missingIds.push(devId);
             }
         }
 
-        // 2. Fetch missing from DB and securely assign to cache
+        // Only hit MongoDB for devices not found in our extremely fast RAM cache
         if (missingIds.length > 0) {
-            const fetchedDb = await Device.find({ deviceId: { $in: missingIds }, owner: userId }).lean();
-            for (const d of fetchedDb) {
+            const fetchedDevices = await Device.find({ deviceId: { $in: missingIds }, owner: userId }).lean();
+            for (const d of fetchedDevices) {
+                deviceMap[d.deviceId] = d;
                 deviceCache.set(d.deviceId, d);
-                devices.push(d);
             }
         }
-
-        const deviceMap = Object.fromEntries(devices.map(d => [d.deviceId, d]));
 
         for (const d of requestedDevices) {
             const [deviceId, switchIdStr] = d.id.split('-');
@@ -2236,6 +2302,6 @@ app.get('/api/health', (req, res) => {
 });
 
 // Start Server
-app.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Backend server running at http://localhost:${PORT}`);
 });

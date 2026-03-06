@@ -188,7 +188,61 @@ async function initHome() {
 
 
     fetchDevices();
-    setInterval(fetchDevices, 2000);
+
+    // SOCKET.IO REAL-TIME CONNECTION
+    try {
+        // Strip out '/api' so it connects to the root WebSocket server
+        const socketURL = API_URL.replace(/\/api\/?$/, "");
+        const socket = io(socketURL, {
+            auth: { token: token },
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000
+        });
+
+        socket.on('connect', () => {
+            console.log('[Socket.io] Connected to server for real-time updates');
+            // Fetch once on connect/reconnect to ensure no missed states
+            fetchDevices();
+        });
+
+        socket.on('connect_error', (err) => {
+            if (err.message === 'Authentication error') {
+                console.error('[Socket.io] Auth Error. Logging out.');
+                localStorage.removeItem('token');
+                window.location.href = 'index.html';
+            }
+        });
+
+        socket.on('disconnect', () => {
+            console.warn('[Socket.io] Disconnected. Waiting for auto-reconnection...');
+        });
+
+        socket.on('devices_updated', (devices) => {
+            window.allDevices = devices;
+
+            // Instantly update the top temperature/humidity sensor display
+            if (devices.length > 0) {
+                let sensorDevice = null;
+                const preferredId = localStorage.getItem('primarySensorId');
+                if (preferredId) {
+                    sensorDevice = devices.find(d => d.deviceId === preferredId);
+                }
+                if (!sensorDevice) {
+                    sensorDevice = devices.find(d => d.temperature > 0 || d.humidity > 0) || devices[0];
+                }
+                const tempEl = document.getElementById('temp-display');
+                const humEl = document.getElementById('hum-display');
+                if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
+                if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
+            }
+
+            renderGrid(devices);
+        });
+    } catch (err) {
+        console.error("[Socket.io] Connection setup failed", err);
+    }
 
     window.currentDeviceId = null;
     window.currentSwitchId = null;
