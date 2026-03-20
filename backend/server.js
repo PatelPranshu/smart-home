@@ -177,7 +177,19 @@ async function emitDeviceUpdates(userIdStr) {
     try {
         const devices = await Device.find({ owner: userIdStr }).lean();
 
-        // Inject fresh data into cache for 2 seconds
+        // --- OPTIMIZATION: Merge High-Frequency Memory Cache ---
+        // Because MongoDB writes for sensors are throttled (once per 60s), 
+        // the DB might have stale temperature/humidity. We must overwrite it
+        // with the absolute latest values from our memory cache before emitting.
+        devices.forEach(d => {
+            const cachedDevice = deviceCache.get(d.deviceId);
+            if (cachedDevice) {
+                d.temperature = cachedDevice.temperature !== undefined ? cachedDevice.temperature : d.temperature;
+                d.humidity = cachedDevice.humidity !== undefined ? cachedDevice.humidity : d.humidity;
+            }
+        });
+
+        // Inject fresh data into cache for frontend HTTP polling (valid for 2s)
         const cacheKey = `user_devices_${userIdStr}`;
         deviceCache.set(cacheKey, devices);
         setTimeout(() => deviceCache.delete(cacheKey), 2000);
