@@ -220,6 +220,8 @@ async function initHome() {
         });
 
         socket.on('devices_updated', (devices) => {
+            // [NEW] Optimistic UI Background Sync
+            localStorage.setItem('cachedDevices', JSON.stringify(devices));
             window.allDevices = devices;
 
             // Instantly update the top temperature/humidity sensor display
@@ -1095,15 +1097,40 @@ async function fetchDevices() {
     const grid = document.getElementById('device-grid');
     if (!grid) return;
 
-    try {
-        const res = await fetch(`${API_URL}/devices?t=${Date.now()}`, {
-            headers: { 'x-access-token': token },
-            cache: 'no-store'
-        });
+    // --- OPTIMISTIC UI: Load from Local Storage First (Zero-Latency) ---
+    const cached = localStorage.getItem('cachedDevices');
+    if (cached) {
+        try {
+            const parsed = JSON.parse(cached);
+            window.allDevices = parsed;
+            
+            if (parsed.length > 0) {
+                let sensorDevice = null;
+                const preferredId = localStorage.getItem('primarySensorId');
+                if (preferredId) sensorDevice = parsed.find(d => d.deviceId === preferredId);
+                if (!sensorDevice) sensorDevice = parsed.find(d => d.temperature > 0 || d.humidity > 0) || parsed[0];
 
-        const devices = await res.json();
+                const tempEl = document.getElementById('temp-display');
+                const humEl = document.getElementById('hum-display');
+                if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
+                if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
+            }
+            renderGrid(parsed);
+        } catch (e) {
+            console.error('Failed to load cached devices', e);
+        }
+    }
 
-        // --- NEW: Store globally for the popup to use ---
+    // --- SILENT BACKGROUND FETCH ---
+    fetch(`${API_URL}/devices?t=${Date.now()}`, {
+        headers: { 'x-access-token': token },
+        cache: 'no-store'
+    })
+    .then(res => res.json())
+    .then(devices => {
+        // Persist for future fast loads
+        localStorage.setItem('cachedDevices', JSON.stringify(devices));
+        
         window.allDevices = devices;
 
         // --- UPDATED: Select device based on User Preference ---
@@ -1129,7 +1156,8 @@ async function fetchDevices() {
         }
 
         renderGrid(devices);
-    } catch (err) { console.error("Fetch error", err); }
+    })
+    .catch(err => console.error("Fetch error", err));
 }
 
 function renderGrid(devices) {

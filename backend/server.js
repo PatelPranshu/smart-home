@@ -35,14 +35,18 @@ process.on('uncaughtException', (err) => {
 // ==========================================
 // Caches Mongoose documents to prevent db-thrashing on Free Tier
 class NativeCache {
-    constructor(ttlSeconds = 15) {
+    constructor(ttlSeconds = 15, maxSize = 500) {
         this.cache = new Map();
         this.ttl = ttlSeconds * 1000;
+        this.maxSize = maxSize;
         this._gcTimer = null;
     }
     set(key, value) {
+        if (this.cache.size >= this.maxSize) {
+            this.cache.delete(this.cache.keys().next().value);
+        }
         // Deep clone to prevent external mutations from corrupting cached data
-        const cloned = JSON.parse(JSON.stringify(value));
+        const cloned = typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
         this.cache.set(key, { data: cloned, expiry: Date.now() + this.ttl });
     }
     get(key) {
@@ -143,7 +147,10 @@ const server = http.createServer(app);
 
 // SOCKET.IO SETUP
 const io = new Server(server, {
-    cors: { origin: "*", methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }
+    cors: { 
+        origin: [process.env.FRONTEND_URL, process.env.ORIGIN_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean), 
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] 
+    }
 });
 
 // Socket.io Authentication Middleware
@@ -253,6 +260,72 @@ app.use((req, res, next) => {
 
 app.use(mongoSanitize());
 
+// Global active timers object
+let activeTimers = {};
+
+async function restoreActiveTimers() {
+    try {
+        const devices = await Device.find({ "switches.timerExpiresAt": { $gt: new Date() } }).lean();
+        devices.forEach(device => {
+            device.switches.forEach(sw => {
+                if (sw.timerExpiresAt && new Date(sw.timerExpiresAt) > new Date()) {
+                    const timerKey = `${device.deviceId}-${sw.id}`;
+                    const timeRemaining = new Date(sw.timerExpiresAt).getTime() - new Date().getTime();
+                    
+                    if (activeTimers[timerKey]) clearTimeout(activeTimers[timerKey]);
+                    
+                    activeTimers[timerKey] = setTimeout(async () => {
+                        console.log(`[BOOT RECOVERED] Timer expired! Turning off ${device.deviceId} switch ${sw.id}`);
+                        
+                        const dbDevice = await Device.findOne({ deviceId: device.deviceId });
+                        const dbSw = dbDevice ? dbDevice.switches.find(s => s.id === sw.id) : null;
+                        
+                        const endSignal = (dbSw && dbSw.inverted) ? true : false;
+                        mqttClient.publish(`devices/${device.deviceId}/command`, JSON.stringify({ switchId: sw.id, state: endSignal }));
+                        
+                        await Device.updateOne(
+                            { deviceId: device.deviceId, "switches.id": sw.id },
+                            {
+                                $set: {
+                                    "switches.$.state": false,
+                                    "switches.$.lastOnTime": null,
+                                    "switches.$.timerExpiresAt": null
+                                }
+                            }
+                        );
+                        
+                        if (dbDevice) {
+                            await History.create({
+                                owner: dbDevice.owner,
+                                deviceId: device.deviceId,
+                                switchName: dbSw ? dbSw.name : `Switch ${sw.id}`,
+                                action: "Turned OFF (Timer Recovery)",
+                                timestamp: new Date()
+                            });
+                        }
+                        
+                        if (dbDevice && dbDevice.owner) {
+                            const ownerRecord = await User.findById(dbDevice.owner).lean();
+                            if (ownerRecord && ownerRecord.isGoogleLinked === true) {
+                                try {
+                                    await reportStateToGoogle(
+                                        dbDevice.owner.toString(),
+                                        { [`${device.deviceId}-${sw.id}`]: { on: false, online: true } }
+                                    );
+                                } catch (e) {}
+                            }
+                        }
+                        delete activeTimers[timerKey];
+                    }, timeRemaining);
+                    console.log(`[BOOT RECOVERED] Restored timer for ${device.deviceId} switch ${sw.id}`);
+                }
+            });
+        });
+    } catch (err) {
+        console.error('Failed to restore active timers:', err);
+    }
+}
+
 // Database Connection
 const dbOptions = {
     autoIndex: true, // Maintain indexes
@@ -263,7 +336,10 @@ const dbOptions = {
 };
 
 mongoose.connect(process.env.MONGO_URI, dbOptions)
-    .then(() => console.log('✅ MongoDB Connected (Optimized)'))
+    .then(async () => {
+        console.log('✅ MongoDB Connected (Optimized)');
+        await restoreActiveTimers();
+    })
     .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
 // Handle sudden disconnections
@@ -352,8 +428,21 @@ mqttClient.on('connect', () => {
     mqttClient.subscribe('$share/backend/devices/+/version'); // OTA: Firmware version reports
 });
 
+const sensorLastWritten = new Map();
+
+function safeParse(buffer, topic) {
+    try { return JSON.parse(buffer.toString()); }
+    catch (e) {
+        console.warn(`[MQTT PARSE ERROR] Invalid payload on topic ${topic}`);
+        return null;
+    }
+}
+
 // Handle MQTT Messages
 mqttClient.on('message', async (topic, message) => {
+    // SECURITY: Payload Guard for memory exhaustion attacks
+    if (message.length > 1024) return;
+
     // [CRITICAL] Global try-catch to prevent server crashes on bad data
     try {
         const parts = topic.split('/');
@@ -368,7 +457,8 @@ mqttClient.on('message', async (topic, message) => {
         // 1. User flipped physical switch -> Update DB
         // -------------------------------------------------
         if (type === 'update') {
-            const data = JSON.parse(message.toString());
+            const data = safeParse(message, topic);
+            if (!data) return;
 
             // Cache check
             let device = deviceCache.get(deviceId);
@@ -454,23 +544,22 @@ mqttClient.on('message', async (topic, message) => {
             const status = message.toString().trim();
             const isOnline = status === 'online';
 
-            // IMPORTANT USER FIX: Execute Update FIRST to prevent stale reads
-            const updateResult = await Device.updateOne(
-                { deviceId: deviceId, isOnline: { $ne: isOnline } },
+            // IMPORTANT USER FIX: Execute Update FIRST to prevent stale reads. Force sync by omitting $ne check.
+            await Device.updateOne(
+                { deviceId: deviceId },
                 { $set: { isOnline: isOnline } }
             );
 
-            if (updateResult.modifiedCount > 0) {
-                console.log(`Device ${deviceId} is now ${status}`);
-                deviceCache.delete(deviceId); // Invalidate cache
+            console.log(`Device ${deviceId} is now ${status} (Forced Sync)`);
+            deviceCache.delete(deviceId); // Invalidate cache
 
-                // Fetch freshly updated device
-                const device = await Device.findOne({ deviceId }).lean();
-                if (!device) return;
+            // Fetch freshly updated device
+            const device = await Device.findOne({ deviceId }).lean();
+            if (!device) return;
 
-                if (device.owner) {
-                    emitDeviceUpdates(device.owner.toString());
-                }
+            if (device.owner) {
+                emitDeviceUpdates(device.owner.toString());
+            }
 
                 // OTA: If device just came online and has a pending update, push it
                 if (isOnline && device.pendingUpdate) {
@@ -510,14 +599,14 @@ mqttClient.on('message', async (topic, message) => {
                         queueGoogleReport(device.owner.toString(), statesPayload);
                     }
                 }
-            }
         }
 
         // -------------------------------------------------
         // 4. Handle Sensor Data (Temp/Hum)
         // -------------------------------------------------
         else if (type === 'sensor') {
-            const data = JSON.parse(message.toString());
+            const data = safeParse(message, topic);
+            if (!data) return;
             const now = Date.now();
 
             // 1. Instantly update deviceCache so frontend sees it immediately and Emit
@@ -533,12 +622,11 @@ mqttClient.on('message', async (topic, message) => {
                 }).catch(() => { });
             }
 
-            // 2. Throttle MongoDB writes (max once per 60s per device)
-            if (!global.sensorLastWritten) global.sensorLastWritten = {};
-            const lastWritten = global.sensorLastWritten[deviceId] || 0;
+            // 2. Throttle MongoDB writes (max once per 60s per device) using Map
+            const lastWritten = sensorLastWritten.get(deviceId) || 0;
 
             if (now - lastWritten > 60000) {
-                global.sensorLastWritten[deviceId] = now;
+                sensorLastWritten.set(deviceId, now);
                 await Device.updateOne(
                     { deviceId: deviceId },
                     { $set: { temperature: data.temp, humidity: data.hum } }
@@ -1034,7 +1122,6 @@ app.post('/api/edit', auth, [
 
 
 // Timer (Auto Turn Off)
-let activeTimers = {};
 
 app.post('/api/timer', auth, async (req, res) => {
     const { deviceId, switchId, minutes } = req.body;
@@ -1250,7 +1337,7 @@ app.post('/api/verify-code', auth, async (req, res) => {
 app.get('/api/history', auth, async (req, res) => {
     try {
         // Fetch logs for this user, sorted by newest first     
-        const logs = await History.find({ owner: req.user.id }).sort({ timestamp: -1 });
+        const logs = await History.find({ owner: req.user.id }).sort({ timestamp: -1 }).lean();
         res.json(logs);
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch history" });
@@ -1278,7 +1365,7 @@ app.get('/api/admin/stats', auth, verifyAdmin, async (req, res) => {
 app.get('/api/admin/devices', auth, verifyAdmin, async (req, res) => {
     try {
         // Populate 'owner' to get the user's email
-        const devices = await Device.find().populate('owner', 'email').sort({ _id: -1 });
+        const devices = await Device.find().populate('owner', 'email').sort({ _id: -1 }).lean();
         res.json(devices);
     } catch (err) { res.status(500).json({ error: "Fetch failed" }); }
 });
@@ -1335,7 +1422,7 @@ app.delete('/api/admin/device/:id', auth, verifyAdmin, async (req, res) => {
 // List Users
 app.get('/api/admin/users', auth, verifyAdmin, async (req, res) => {
     try {
-        const users = await User.find().select('-password').sort({ createdAt: -1 });
+        const users = await User.find().select('-password').sort({ createdAt: -1 }).lean();
         res.json(users);
     } catch (err) { res.status(500).json({ error: "Users failed" }); }
 });
