@@ -20,6 +20,17 @@ const { body, validationResult } = require('express-validator');
 const morgan = require('morgan');
 
 // ==========================================
+// GLOBAL CRASH HANDLERS (Prevent silent deaths)
+// ==========================================
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[FATAL] Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('[FATAL] Uncaught Exception:', err);
+    process.exit(1);
+});
+
+// ==========================================
 // 0. LIGHTWEIGHT IN-MEMORY CACHE (Zero Dependency)
 // ==========================================
 // Caches Mongoose documents to prevent db-thrashing on Free Tier
@@ -30,7 +41,9 @@ class NativeCache {
         this._gcTimer = null;
     }
     set(key, value) {
-        this.cache.set(key, { data: value, expiry: Date.now() + this.ttl });
+        // Deep clone to prevent external mutations from corrupting cached data
+        const cloned = JSON.parse(JSON.stringify(value));
+        this.cache.set(key, { data: cloned, expiry: Date.now() + this.ttl });
     }
     get(key) {
         const item = this.cache.get(key);
@@ -91,7 +104,11 @@ async function queueGoogleReport(userIdStr, statesPayload) {
     const userQueue = googleReportQueue.get(userIdStr);
 
     // Merge new states
-    Object.assign(userQueue.states, statesPayload);
+    // Prototype pollution defense: only merge own, safe keys
+    for (const key of Object.keys(statesPayload)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+        userQueue.states[key] = statesPayload[key];
+    }
 
     // Reset debounce timer (2 seconds)
     if (userQueue.timeout) clearTimeout(userQueue.timeout);
@@ -220,7 +237,7 @@ app.use('/api/verify-password', authLimiter); // identifying wifi password
 app.use('/api/verify-code', authLimiter);     // guessing kit codes
 app.use('/api/claim-device', authLimiter);    // guessing device IDs
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // Patch for Express 5.0 Read-Only Query
 app.use((req, res, next) => {
@@ -314,7 +331,7 @@ async function requestSyncToGoogle(agentUserId) {
 }
 
 // Enable parsing form data for the login page
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 
 
@@ -585,7 +602,7 @@ const auth = async (req, res, next) => {
         const verified = jwt.verify(token, process.env.JWT_SECRET);
 
         // Fetch user to verify tokenVersion
-        const user = await User.findById(verified.id);
+        const user = await User.findById(verified.id).lean();
         if (!user) {
             return res.status(401).send("User not found");
         }
@@ -613,7 +630,7 @@ const verifyAdmin = async (req, res, next) => {
     try {
         // req.user.id comes from the previous 'auth' middleware
         // fetch the user from DB to ensure the role is current
-        const user = await User.findById(req.user.id);
+        const user = await User.findById(req.user.id).lean();
 
         // Check if user exists and has role 'admin'
         if (!user || user.role !== 'admin') {
@@ -705,7 +722,7 @@ app.post('/api/logout-all', auth, async (req, res) => {
 // Get User Settings (Profile & Preferences)
 app.get('/api/user/profile', auth, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
+        const user = await User.findById(req.user.id).lean();
         res.json({
             email: user.email,
             role: user.role,
@@ -745,7 +762,7 @@ app.post('/api/user-update', auth, [
 // Get current status
 app.get('/api/user/google-status', auth, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
+        const user = await User.findById(req.user.id).lean();
         res.json({
             enabled: user.googleHomeEnabled,
             isLinked: user.isGoogleLinked
@@ -896,7 +913,6 @@ app.post('/api/control', auth, [
         } else {
             updateFields["switches.$.lastOnTime"] = null;
             updateFields["switches.$.timerExpiresAt"] = null;
-            if (sw.type === 'fan') updateFields["switches.$.speed"] = 0;
         }
         await Device.updateOne(
             { deviceId: deviceId, "switches.id": switchId },
@@ -944,7 +960,7 @@ app.post('/api/fan-speed', auth, [
     const { deviceId, switchId, speed } = req.body;
 
     try {
-        const device = await Device.findOne({ deviceId, owner: req.user.id });
+        const device = await Device.findOne({ deviceId, owner: req.user.id }).lean();
         if (!device) return res.status(404).json({ error: 'Device not found' });
 
         const sw = device.switches.find(s => s.id === switchId);
@@ -1851,7 +1867,6 @@ app.post('/api/smarthome', auth, async (req, res) => {
                                 } else {
                                     updateFields["switches.$.lastOnTime"] = null;
                                     updateFields["switches.$.timerExpiresAt"] = null;
-                                    if (sw && sw.type === 'fan') updateFields["switches.$.speed"] = 0;
                                 }
                                 await Device.updateOne(
                                     { deviceId, "switches.id": switchId },
