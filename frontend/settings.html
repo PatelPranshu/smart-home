@@ -14,76 +14,78 @@
 
 <body>
     <div class="dashboard-container">
-        <header>
+        <header style="align-items: center;">
             <h2>Settings</h2>
+            <button onclick="openLogoutModal()" style="width: 40px; height: 40px; border-radius: 50%; background: white; border: none; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s;" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
+                <i class="fa-solid fa-power-off" style="color: #ef4444; font-size: 1.1rem;"></i>
+            </button>
         </header>
 
         <div class="content-area" style="padding-top: 20px;">
 
             <div class="settings-group">
                 <h3 class="group-title">Account</h3>
-
-                <div class="settings-card profile-card">
-                    <div class="profile-icon">
-                        <i class="fa-solid fa-user"></i>
+                <div class="settings-card-list">
+                    <div class="list-item profile-card" style="box-shadow: none; margin: 0; padding: 15px 20px;">
+                        <div class="btn-content">
+                            <div class="profile-icon">
+                                <i class="fa-solid fa-user"></i>
+                            </div>
+                            <div class="list-info">
+                                <span id="username-display" class="list-title" style="font-size: 1.1rem;">Loading...</span>
+                                <span class="list-sub role">User</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="profile-info">
-                        <span id="username-display" class="username">Loading...</span>
-                        <span class="role">User</span>
-                    </div>
-                </div>
-
-
-
-                <button class="settings-btn" onclick="openVerifyCodeModal()">
-                    <div class="btn-text">
-                        <i class="fa-solid fa-lock"></i>
-                        <span>Change Account Password</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-right"></i>
-                </button>
-
-
-                <div class="settings-card" style="margin-top: 10px; padding: 15px;">
-                    <label
-                        style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:5px; color:#555;">Dashboard
-                        Title</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="input-home-title" placeholder="My Home" class="input-field"
-                            style="margin-bottom:0;">
-                        <button onclick="saveHomeTitle()" class="btn-primary"
-                            style="width: auto; padding: 0 20px;">Save</button>
+                    <button class="list-item-btn" onclick="openVerifyCodeModal()">
+                        <div class="btn-content">
+                            <div class="icon-box gray"><i class="fa-solid fa-lock"></i></div>
+                            <span class="list-title">Change Account Password</span>
+                        </div>
+                        <i class="fa-solid fa-chevron-right arrow"></i>
+                    </button>
+                    <div class="list-item" style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px;">
+                        <span class="list-title">Dashboard Title</span>
+                        <div style="display: flex; gap: 10px; width: 100%;">
+                            <input type="text" id="input-home-title" placeholder="My Home" class="input-field" style="margin-bottom:0; flex: 1;">
+                            <button onclick="saveHomeTitle()" class="btn-primary" style="width: auto; padding: 0 20px;">Save</button>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <div class="settings-group" style="margin-top: 25px;">
-                <h3 class="group-title">Firmware Updates</h3>
-
-                <div class="settings-card"
-                    style="display: flex; justify-content: space-between; align-items: center; padding: 15px; margin-bottom: 10px;">
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <div
-                            style="width: 40px; height: 40px; background: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #16a34a; font-size: 1.2rem;">
-                            <i class="fa-solid fa-cloud-arrow-down"></i>
+                <h3 class="group-title">System</h3>
+                <div class="settings-card-list">
+                    <div class="list-item" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="btn-content">
+                            <div class="icon-box green"><i class="fa-solid fa-cloud-arrow-down"></i></div>
+                            <div class="list-info">
+                                <span class="list-title">Automatic Updates</span>
+                                <span id="update-pref-sub" class="list-sub" style="font-size: 0.75rem;">Background silent updates</span>
+                            </div>
                         </div>
-                        <div>
-                            <span style="font-weight: 600; color: #333; display: block;">Automatic Updates</span>
-                            <span id="update-pref-sub" style="font-size: 0.75rem; color: #6b7280;">Devices update
-                                silently in the background</span>
-                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="update-pref-toggle" checked onchange="toggleUpdatePreference()">
+                            <span class="slider"></span>
+                        </label>
                     </div>
 
-                    <label class="switch">
-                        <input type="checkbox" id="update-pref-toggle" checked onchange="toggleUpdatePreference()">
-                        <span class="slider"></span>
-                    </label>
+                    <div id="google-integration-section" class="list-item" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="btn-content">
+                            <div class="icon-box blue" style="background: #e8f0fe; color: #4285F4;"><i class="fa-brands fa-google"></i></div>
+                            <span class="list-title">Google Home Access</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="google-toggle" onchange="toggleGoogleHome()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
             <div class="settings-group" style="margin-top: 25px;">
                 <h3 class="group-title">Device Management</h3>
-
                 <div class="settings-card-list">
                     <div id="settings-device-list">
                         <div class="list-item-placeholder">Loading...</div>
@@ -91,123 +93,56 @@
 
                     <button class="list-item-btn add-btn" onclick="openClaimModal()">
                         <div class="btn-content">
-                            <div class="icon-box green">
-                                <i class="fa-solid fa-plus"></i>
-                            </div>
-                            <span>Add New Device</span>
+                            <div class="icon-box green"><i class="fa-solid fa-plus"></i></div>
+                            <span class="list-title">Add New Device</span>
                         </div>
                         <i class="fa-solid fa-chevron-right arrow"></i>
                     </button>
                     <button class="list-item-btn" onclick="openVerifyPassModal()">
                         <div class="btn-content">
-                            <div class="icon-box blue">
-                                <i class="fa-solid fa-wifi"></i>
-                            </div>
-                            <span>Change Wi-Fi Credentials</span>
+                            <div class="icon-box blue"><i class="fa-solid fa-wifi"></i></div>
+                            <span class="list-title">Change Wi-Fi Credentials</span>
                         </div>
                         <i class="fa-solid fa-chevron-right arrow"></i>
                     </button>
                 </div>
             </div>
 
-            <!-- <div class="settings-group" style="margin-top: 25px;">
-                <h3 class="group-title">Network Settings</h3>
-                
+            <div class="settings-group" style="margin-top: 25px; margin-bottom: 120px;">
+                <h3 class="group-title">Server Configuration</h3>
                 <div class="settings-card-list">
-                    <button class="list-item-btn" onclick="openVerifyPassModal()">
-                        <div class="btn-content">
-                            <div class="icon-box blue">
-                                <i class="fa-solid fa-wifi"></i>
+                    <div class="list-item" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="btn-content" style="flex:1;">
+                            <div id="server-status-icon" class="icon-box green"><i class="fa-solid fa-server"></i></div>
+                            <div class="list-info" style="min-width:0; flex:1;">
+                                <span class="list-title">Active Server</span>
+                                <span id="active-server-url" class="list-sub" style="font-size: 0.75rem; word-break: break-all;">Loading...</span>
                             </div>
-                            <span>Change Wi-Fi ID/Password</span>
-                        </div>
-                        <i class="fa-solid fa-chevron-right arrow"></i>
-                    </button>
-                </div>
-            </div> -->
-
-            <div id="google-integration-section" class="settings-group" style="margin-top: 25px;">
-                <h3 class="group-title">Integrations</h3>
-
-                <div class="settings-card"
-                    style="display: flex; justify-content: space-between; align-items: center; padding: 15px; margin-bottom: 10px;">
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <div
-                            style="width: 40px; height: 40px; background: #e8f0fe; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #4285F4; font-size: 1.2rem;">
-                            <i class="fa-brands fa -google"></i>
-                        </div>
-                        <span style="font-weight: 600; color: #333;">Google Home Access</span>
-                    </div>
-
-                    <label class="switch">
-                        <input type="checkbox" id="google-toggle" onchange="toggleGoogleHome()">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-            </div>
-
-            <!-- <div class="settings-group" style="margin-top: 25px;">
-                <h3 class="group-title">Appearance</h3>
-                
-                <div class="settings-card" style="display: flex; justify-content: space-between; align-items: center; padding: 15px;">
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <div style="width: 40px; height: 40px; background: #f3e8ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #a855f7; font-size: 1.2rem;">
-                            <i class="fa-solid fa-moon"></i>
-                        </div>
-                        <span style="font-weight: 600; font-size: 1rem;">Dark Mode</span>
-                    </div>
-                    
-                    <label class="switch">
-                        <input type="checkbox" id="theme-toggle" onchange="toggleTheme()">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-            </div> -->
-
-            <div class="settings-group" style="margin-top: 25px;">
-                <h3 class="group-title">Server Settings</h3>
-
-                <div class="settings-card" style="padding: 15px; margin-bottom: 10px;">
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <div id="server-status-icon"
-                            style="width: 40px; height: 40px; background: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #16a34a; font-size: 1.2rem;">
-                            <i class="fa-solid fa-server"></i>
-                        </div>
-                        <div style="flex: 1; min-width: 0;">
-                            <span style="font-weight: 600; color: #333; font-size: 0.85rem;">Active Server</span>
-                            <div id="active-server-url"
-                                style="font-size: 0.75rem; color: #6b7280; margin-top: 2px; word-break: break-all;">
-                                Loading...</div>
                         </div>
                         <span id="server-status-badge" class="server-status-badge online">Connected</span>
                     </div>
-                </div>
 
-                <div id="server-countdown-bar" class="server-countdown hidden">
-                    <i class="fa-solid fa-triangle-exclamation"></i>
-                    <span id="server-countdown-text">Server unreachable. Switching to automatic in 20s...</span>
-                </div>
-
-                <div class="settings-card" style="padding: 15px; margin-bottom: 10px;">
-                    <label
-                        style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:10px; color:#555;">Server
-                        Mode</label>
-                    <div class="server-mode-toggle">
-                        <button id="mode-auto-btn" class="mode-btn active" onclick="selectServerMode('auto')">
-                            <i class="fa-solid fa-arrows-rotate"></i> Automatic
-                        </button>
-                        <button id="mode-manual-btn" class="mode-btn" onclick="selectServerMode('manual')">
-                            <i class="fa-solid fa-hand-pointer"></i> Manual
-                        </button>
+                    <div id="server-countdown-bar" class="server-countdown hidden" style="border-radius:0; border-left:none; border-right:none; margin:0; box-shadow:none;">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span id="server-countdown-text">Server unreachable. Auto-switching in 20s...</span>
                     </div>
-                </div>
 
-                <div id="manual-server-list" class="settings-card-list hidden" style="margin-top: 10px;">
+                    <div class="list-item" style="flex-direction: column; align-items: stretch; gap: 15px;">
+                        <span class="list-title" style="margin-bottom: 5px;">Server Mode</span>
+                        <div class="server-mode-toggle">
+                            <button id="mode-auto-btn" class="mode-btn active" onclick="selectServerMode('auto')">
+                                <i class="fa-solid fa-arrows-rotate"></i> Automatic
+                            </button>
+                            <button id="mode-manual-btn" class="mode-btn" onclick="selectServerMode('manual')">
+                                <i class="fa-solid fa-hand-pointer"></i> Manual
+                            </button>
+                        </div>
+                        <div id="manual-server-list" class="settings-card-list hidden" style="box-shadow:none; border:1px solid #f3f4f6; margin-top:10px;">
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <button onclick="openLogoutModal()" class="btn-primary logout-btn" style="margin-bottom: 150px;">Log
-                Out</button>
         </div>
 
         <div class="bottom-nav">

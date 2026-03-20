@@ -579,7 +579,7 @@ async function initSettings() {
         const data = await res.json();
         // Only show if linked
         if (data.isLinked) {
-            if (sectionEl) sectionEl.style.display = 'block'; // Show it
+            if (sectionEl) sectionEl.style.display = 'flex'; // Fix: Keep it as flex for UI alignment
             if (toggleEl) toggleEl.checked = data.enabled;
         } else {
             if (sectionEl) sectionEl.style.display = 'none'; // Keep hidden
