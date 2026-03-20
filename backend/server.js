@@ -27,6 +27,7 @@ class NativeCache {
     constructor(ttlSeconds = 15) {
         this.cache = new Map();
         this.ttl = ttlSeconds * 1000;
+        this._gcTimer = null;
     }
     set(key, value) {
         this.cache.set(key, { data: value, expiry: Date.now() + this.ttl });
@@ -42,8 +43,21 @@ class NativeCache {
     }
     delete(key) { this.cache.delete(key); }
     clear() { this.cache.clear(); }
+    /** Starts a self-cleaning garbage collection interval to sweep expired keys */
+    startGC(intervalMs = 60000) {
+        if (this._gcTimer) return;
+        this._gcTimer = setInterval(() => {
+            const now = Date.now();
+            for (const [key, item] of this.cache) {
+                if (now > item.expiry) this.cache.delete(key);
+            }
+        }, intervalMs);
+        // Prevent GC timer from keeping the Node.js process alive during shutdown
+        if (this._gcTimer.unref) this._gcTimer.unref();
+    }
 }
 const deviceCache = new NativeCache(15); // Cache devices for 15 seconds
+deviceCache.startGC(60000); // Sweep expired keys every 60s to prevent memory leaks
 const { google } = require('googleapis');
 const PORT = process.env.PORT || 3000;
 
@@ -1815,6 +1829,13 @@ app.post('/api/smarthome', auth, async (req, res) => {
                             const hardwareSignal = (sw && sw.inverted) ? !newState : newState;
                             mqttClient.publish(`devices/${deviceId}/command`, JSON.stringify({ switchId, state: hardwareSignal }));
 
+                            // ✅ Synchronously update deviceCache so an immediate QUERY reads the correct state
+                            if (dbDevice) {
+                                const cachedSw = dbDevice.switches.find(s => s.id === switchId);
+                                if (cachedSw) cachedSw.state = newState;
+                                deviceCache.set(deviceId, dbDevice);
+                            }
+
                             // ✅ Build the SUCCESS response right away — no DB wait
                             commandResults.push({
                                 ids: [device.id],
@@ -1856,6 +1877,16 @@ app.post('/api/smarthome', auth, async (req, res) => {
 
                             // ✅ Publish MQTT immediately
                             mqttClient.publish(`devices/${deviceId}/fan-speed`, JSON.stringify({ switchId, speed }));
+
+                            // ✅ Synchronously update deviceCache so an immediate QUERY reads the correct state
+                            if (dbDevice) {
+                                const cachedSw = dbDevice.switches.find(s => s.id === switchId);
+                                if (cachedSw) {
+                                    cachedSw.state = true;
+                                    cachedSw.speed = speed;
+                                }
+                                deviceCache.set(deviceId, dbDevice);
+                            }
 
                             // ✅ Build the SUCCESS response right away — no DB wait
                             commandResults.push({
