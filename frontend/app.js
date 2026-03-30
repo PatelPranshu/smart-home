@@ -298,7 +298,13 @@ async function initHome() {
                 } else {
                     const m = Math.ceil((diff / 1000 / 60) % 60);
                     const h = Math.floor((diff / 1000 / 60 / 60));
-                    countdownEl.innerText = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+                    const d = Math.floor(h / 24);
+
+                    if (d > 0) {
+                        countdownEl.innerText = `${d}d ${h % 24}h left`;
+                    } else {
+                        countdownEl.innerText = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+                    }
                 }
             };
 
@@ -1193,7 +1199,15 @@ function renderGrid(devices) {
                 const diffMs = new Date() - new Date(sw.lastOnTime);
                 const mins = Math.floor(diffMs / 60000);
                 const hrs = Math.floor(mins / 60);
-                runtimeText = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins} mins`;
+                const days = Math.floor(hrs / 24);
+
+                if (days > 0) {
+                    runtimeText = `${days}d ${hrs % 24}h`;
+                } else if (hrs > 0) {
+                    runtimeText = `${hrs}h ${mins % 60}m`;
+                } else {
+                    runtimeText = `${mins} mins`;
+                }
             }
             if (isOnline && sw.state && sw.timerExpiresAt) {
                 const timeLeftMs = new Date(sw.timerExpiresAt) - new Date();
