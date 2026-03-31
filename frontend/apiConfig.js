@@ -3,14 +3,33 @@
 // ==========================================
 
 const SERVERS = [
+    // 'http://192.168.31.29:3000/api',
     'https://smart-home-04m4.onrender.com/api',
     'https://smart-home-emergency.onrender.com/api'
+    
 ];
 
 // --- Server Mode Management ---
 // 'auto' = original failover behavior, 'manual' = user picks the server
 window.serverMode = localStorage.getItem('serverMode') || 'auto';
-window.API_URL = localStorage.getItem('activeBackend') || SERVERS[0];
+
+let savedBackend = localStorage.getItem('activeBackend');
+const currentHost = window.location.hostname;
+
+// 🔥 SMART CACHE BUSTING: If accessing via network IP (192.168...)
+// but the browser stubbornly saved 'localhost', nuke the cached data programmatically.
+if (savedBackend && savedBackend.includes('localhost') && currentHost !== 'localhost') {
+    console.warn(`[API] Invalid cached backend (${savedBackend}) detected. Forcing reset.`);
+    savedBackend = null;
+    localStorage.removeItem('activeBackend');
+}
+
+if (window.serverMode === 'auto' || !savedBackend) {
+    window.API_URL = SERVERS[0]; // Will now strictly pull your 192.168.x.x URL
+    localStorage.removeItem('activeBackend');
+} else {
+    window.API_URL = savedBackend;
+}
 
 // Timer ID for the 20-second manual-mode auto-revert countdown
 let _manualRevertTimerId = null;
@@ -34,6 +53,10 @@ function setServerMode(mode) {
     _clearRevertTimer();
 
     if (mode === 'auto') {
+        // FIX: Reset back to Server 1 automatically when switching to Auto mode
+        window.API_URL = SERVERS[0];
+        localStorage.removeItem('activeBackend');
+        
         // Immediately find best server when switching to auto
         findActiveServer();
     }
@@ -84,6 +107,8 @@ async function checkServerHealth(serverUrl) {
         clearTimeout(timeoutId);
         return response.ok;
     } catch (error) {
+        // 🔥 DEBUGGING FIX: Print the exact reason the ping is failing to the console
+        console.error(`[API Health Check Failed] ${serverUrl}:`, error.message);
         return false;
     }
 }
@@ -117,7 +142,7 @@ async function findActiveServer() {
             if (isHealthy) {
                 console.log(`[API] Switching to healthy fallback: ${server}`);
                 window.API_URL = server;
-                localStorage.setItem('activeBackend', server);
+                // FIX: Do NOT store fallback server in localStorage so it resets on page load
                 window.dispatchEvent(new CustomEvent('activeServerChanged', { detail: { server } }));
                 return;
             }
@@ -150,8 +175,7 @@ function _startManualRevertCountdown() {
     }, 20000);
 }
 
-// Perform initial check on script load
-findActiveServer();
+
 
 // --- GLOBAL FETCH INTERCEPTOR FOR AUTOMATIC FAILOVER ---
 const _originalFetch = window.fetch;
@@ -212,3 +236,6 @@ window.fetch = async function (...args) {
         throw error;
     }
 };
+
+// Perform initial check on script load
+findActiveServer();

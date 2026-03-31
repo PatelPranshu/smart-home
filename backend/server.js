@@ -149,8 +149,13 @@ const server = http.createServer(app);
 const io = new Server(server, {
     cors: { 
         origin: [process.env.FRONTEND_URL, process.env.ORIGIN_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean), 
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] 
-    }
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        credentials: true
+    },
+    // Allow both WebSocket and polling for maximum compatibility
+    transports: ['websocket', 'polling'],
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 // Socket.io Authentication Middleware
@@ -168,8 +173,22 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
     // Join a room named after the user's ID
-    socket.join(socket.user.id.toString());
-    console.log(`[Socket.io] Connected: User ${socket.user.id}`);
+    const userId = socket.user.id.toString();
+    socket.join(userId);
+    console.log(`[Socket.io] Connected: User ${userId} (socket: ${socket.id})`);
+
+    // Allow frontend to request a fresh device snapshot on reconnect
+    socket.on('request_devices', async () => {
+        try {
+            await emitDeviceUpdates(userId);
+        } catch (err) {
+            console.error('[Socket.io] request_devices error:', err.message);
+        }
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log(`[Socket.io] Disconnected: User ${userId} (reason: ${reason})`);
+    });
 });
 
 // Helper Function: Emit Real-Time Updates
@@ -306,6 +325,12 @@ async function restoreActiveTimers() {
                             }
                         );
                         
+                        // Invalidate cache and emit real-time update
+                        deviceCache.delete(device.deviceId);
+                        if (dbDevice && dbDevice.owner) {
+                            emitDeviceUpdates(dbDevice.owner.toString());
+                        }
+
                         if (dbDevice) {
                             await History.create({
                                 owner: dbDevice.owner,
@@ -1125,6 +1150,11 @@ app.post('/api/edit', auth, [
         );
 
         if (result.matchedCount === 0) return res.status(404).json({ error: "Device not found or access denied" });
+
+        // Invalidate cache and emit real-time update
+        deviceCache.delete(deviceId);
+        emitDeviceUpdates(req.user.id.toString());
+
         res.json({ status: 'updated' });
 
         // Tell Google to refresh so renamed devices appear with their new name
@@ -1170,6 +1200,10 @@ app.post('/api/timer', auth, async (req, res) => {
             }
         );
 
+        // Invalidate cache and emit real-time update
+        deviceCache.delete(deviceId);
+        emitDeviceUpdates(req.user.id.toString());
+
         // 4. Log "TURNED ON" History
         await History.create({
             owner: req.user.id,
@@ -1204,6 +1238,12 @@ app.post('/api/timer', auth, async (req, res) => {
                     }
                 }
             );
+
+            // Invalidate cache and emit real-time update for timer expiry
+            deviceCache.delete(deviceId);
+            if (deviceAtExpiry && deviceAtExpiry.owner) {
+                emitDeviceUpdates(deviceAtExpiry.owner.toString());
+            }
 
             // 8. Log "Turned OFF" History
             if (deviceAtExpiry) {
@@ -1273,6 +1313,10 @@ app.post('/api/timer/cancel', auth, async (req, res) => {
             { deviceId: deviceId, "switches.id": switchId },
             { $set: { "switches.$.state": false, "switches.$.lastOnTime": null, "switches.$.timerExpiresAt": null } }
         );
+
+        // Invalidate cache and emit real-time update
+        deviceCache.delete(deviceId);
+        emitDeviceUpdates(req.user.id.toString());
 
         res.json({ status: 'timer_cancelled' });
 
@@ -2036,7 +2080,10 @@ app.post('/api/smarthome', auth, async (req, res) => {
             });
 
             // Run all background DB/reporting jobs after the response is sent
-            Promise.all(backgroundJobs.map(job => job())).catch(e =>
+            Promise.all(backgroundJobs.map(job => job())).then(() => {
+                // Emit real-time update to frontend after all DB writes complete
+                emitDeviceUpdates(userId.toString());
+            }).catch(e =>
                 console.error('[EXECUTE BG ERROR]', e.message)
             );
         } catch (err) {

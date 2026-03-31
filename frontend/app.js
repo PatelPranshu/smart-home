@@ -190,61 +190,94 @@ async function initHome() {
     fetchDevices();
 
     // SOCKET.IO REAL-TIME CONNECTION
-    try {
-        // Strip out '/api' so it connects to the root WebSocket server
-        const socketURL = API_URL.replace(/\/api\/?$/, "");
-        const socket = io(socketURL, {
-            auth: { token: token },
-            reconnection: true,
-            reconnectionAttempts: Infinity,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000
-        });
+    // Make socket global so it persists and can be reconnected on server change
+    function connectSocket() {
+        // Clean up existing connection if any
+        if (window.smartSocket) {
+            window.smartSocket.disconnect();
+            window.smartSocket = null;
+        }
 
-        socket.on('connect', () => {
-            console.log('[Socket.io] Connected to server for real-time updates');
-            // Fetch once on connect/reconnect to ensure no missed states
-            fetchDevices();
-        });
+        try {
+            // Strip out '/api' so it connects to the root WebSocket server
+            const socketURL = API_URL.replace(/\/api\/?$/, "");
+            console.log('[Socket.io] Connecting to:', socketURL);
 
-        socket.on('connect_error', (err) => {
-            if (err.message === 'Authentication error') {
-                console.error('[Socket.io] Auth Error. Logging out.');
-                localStorage.removeItem('token');
-                window.location.href = 'index.html';
-            }
-        });
+            const socket = io(socketURL, {
+                auth: { token: token },
+                reconnection: true,
+                reconnectionAttempts: Infinity,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
+                transports: ['websocket', 'polling'],
+                timeout: 20000,
+                forceNew: true
+            });
 
-        socket.on('disconnect', () => {
-            console.warn('[Socket.io] Disconnected. Waiting for auto-reconnection...');
-        });
+            window.smartSocket = socket;
 
-        socket.on('devices_updated', (devices) => {
-            // [NEW] Optimistic UI Background Sync
-            localStorage.setItem('cachedDevices', JSON.stringify(devices));
-            window.allDevices = devices;
+            socket.on('connect', () => {
+                console.log('[Socket.io] ✅ Connected to server (id:', socket.id, ')');
+                // Request the absolute latest device state from the server
+                socket.emit('request_devices');
+            });
 
-            // Instantly update the top temperature/humidity sensor display
-            if (devices.length > 0) {
-                let sensorDevice = null;
-                const preferredId = localStorage.getItem('primarySensorId');
-                if (preferredId) {
-                    sensorDevice = devices.find(d => d.deviceId === preferredId);
+            socket.on('connect_error', (err) => {
+                console.error('[Socket.io] Connection error:', err.message);
+                if (err.message === 'Authentication error') {
+                    console.error('[Socket.io] Auth Error. Logging out.');
+                    localStorage.removeItem('token');
+                    window.location.href = 'index.html';
                 }
-                if (!sensorDevice) {
-                    sensorDevice = devices.find(d => d.temperature > 0 || d.humidity > 0) || devices[0];
-                }
-                const tempEl = document.getElementById('temp-display');
-                const humEl = document.getElementById('hum-display');
-                if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
-                if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
-            }
+            });
 
-            renderGrid(devices);
-        });
-    } catch (err) {
-        console.error("[Socket.io] Connection setup failed", err);
+            socket.on('disconnect', (reason) => {
+                console.warn('[Socket.io] Disconnected:', reason);
+            });
+
+            socket.on('reconnect', (attemptNumber) => {
+                console.log('[Socket.io] ✅ Reconnected after', attemptNumber, 'attempts');
+                // Re-request devices to catch up on missed updates
+                socket.emit('request_devices');
+            });
+
+            socket.on('devices_updated', (devices) => {
+                console.log('[Socket.io] Received devices_updated:', devices.length, 'devices');
+                // Optimistic UI Background Sync
+                localStorage.setItem('cachedDevices', JSON.stringify(devices));
+                window.allDevices = devices;
+
+                // Instantly update the top temperature/humidity sensor display
+                if (devices.length > 0) {
+                    let sensorDevice = null;
+                    const preferredId = localStorage.getItem('primarySensorId');
+                    if (preferredId) {
+                        sensorDevice = devices.find(d => d.deviceId === preferredId);
+                    }
+                    if (!sensorDevice) {
+                        sensorDevice = devices.find(d => d.temperature > 0 || d.humidity > 0) || devices[0];
+                    }
+                    const tempEl = document.getElementById('temp-display');
+                    const humEl = document.getElementById('hum-display');
+                    if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
+                    if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
+                }
+
+                renderGrid(devices);
+            });
+        } catch (err) {
+            console.error("[Socket.io] Connection setup failed", err);
+        }
     }
+
+    // Initial socket connection
+    connectSocket();
+
+    // Reconnect socket when the active backend server changes (via apiConfig.js failover)
+    window.addEventListener('activeServerChanged', () => {
+        console.log('[Socket.io] Server changed, reconnecting socket...');
+        connectSocket();
+    });
 
     window.currentDeviceId = null;
     window.currentSwitchId = null;
