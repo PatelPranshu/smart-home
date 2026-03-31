@@ -78,6 +78,30 @@ deviceCache.startGC(60000); // Sweep expired keys every 60s to prevent memory le
 const { google } = require('googleapis');
 const PORT = process.env.PORT || 3000;
 
+
+// Centralized CORS Configuration for Production
+const frontendUrls = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(url => url.trim()) : [];
+const allowedOrigins = [
+    ...frontendUrls,
+    process.env.ORIGIN_URL,
+    "https://oauth-redirect.googleusercontent.com"
+].filter(Boolean);
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl) or if origin is in the allowlist
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            console.warn(`[SECURITY] Blocked request from unauthorized origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
+    credentials: true
+};
+
 // ==========================================
 // 1. BACKGROUND TASK QUEUE 
 // ==========================================
@@ -147,12 +171,7 @@ const server = http.createServer(app);
 
 // SOCKET.IO SETUP
 const io = new Server(server, {
-    cors: { 
-        origin: [process.env.FRONTEND_URL, process.env.ORIGIN_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean), 
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        credentials: true
-    },
-    // Allow both WebSocket and polling for maximum compatibility
+    cors: corsOptions, // Reuses professional CORS logic
     transports: ['websocket', 'polling'],
     pingTimeout: 60000,
     pingInterval: 25000
@@ -226,12 +245,7 @@ app.use(morgan('common'));
 app.set('trust proxy', 1);
 
 //CORS HERE ---
-app.use(cors({
-     origin: [process.env.FRONTEND_URL, process.env.ORIGIN_URL, "https://oauth-redirect.googleusercontent.com"].filter(Boolean),
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
-    credentials: true
-}));
+app.use(cors(corsOptions)); // Reuses professional CORS logic
 
 // SECURITY HEADERS
 app.use(helmet({
@@ -242,11 +256,10 @@ app.use(helmet({
             styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "'unsafe-inline'"],
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
             imgSrc: ["'self'", "data:"],
-            connectSrc: ["'self'", process.env.ORIGIN_URL],
+            connectSrc: ["'self'", ...allowedOrigins], // Allow connections from all authorized origins
             formAction: [
                 "'self'",
-                process.env.ORIGIN_URL,
-                "https://oauth-redirect.googleusercontent.com"
+                ...allowedOrigins // Allow form submissions to/from authorized origins
             ],
         },
     },
