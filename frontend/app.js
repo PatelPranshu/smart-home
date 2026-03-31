@@ -666,12 +666,27 @@ async function initSettings() {
             `;
 
             item.onclick = () => {
+                // Allow switching even if offline to let user find a working server
                 if (server === getActiveServer()) return;
+                
+                // 1. Perform the switch in logic
                 setManualServer(server);
+                
+                // 2. Immediate UI update (don't wait for pings)
                 renderServerList();
+                
+                const urlEl = document.getElementById('active-server-url');
+                const badgeEl = document.getElementById('server-status-badge');
+                if (urlEl) urlEl.textContent = server.replace('/api', '');
+                if (badgeEl) {
+                    badgeEl.textContent = 'Connecting...';
+                    badgeEl.className = 'server-status-badge'; // Reset color to neutral
+                }
+                
+                // 3. Trigger health check for the new server
                 updateServerDisplay();
                 showToast(`Switched to ${label}`, 'success');
-            };
+            };11
 
             listEl.appendChild(item);
         });

@@ -46,10 +46,20 @@ function setServerMode(mode) {
  * @param {string} url
  */
 function setManualServer(url) {
+    // 1. Update the URL
     window.API_URL = url;
     localStorage.setItem('activeBackend', url);
+    
+    // 2. Lock the mode to manual (prevents auto-failover from overriding user choice)
+    window.serverMode = 'manual';
+    localStorage.setItem('serverMode', 'manual');
+    
+    // 3. Clear any pending auto-revert timers immediately
     _clearRevertTimer();
+    
+    // 4. Notify the UI
     window.dispatchEvent(new CustomEvent('activeServerChanged', { detail: { server: url } }));
+    window.dispatchEvent(new CustomEvent('serverModeChanged', { detail: { mode: 'manual' } }));
 }
 
 // --- Health Check ---
