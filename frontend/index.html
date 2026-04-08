@@ -23,8 +23,9 @@
                 <div class="form-group">
                     <input type="email" id="email" class="input-field" placeholder="Email" required>
                 </div>
-                <div class="form-group">
+                <div class="form-group password-wrapper">
                     <input type="password" id="password" class="input-field" placeholder="Password" required>
+                    <i class="fa-solid fa-eye-slash toggle-password" onclick="togglePassword('password', this)"></i>
                 </div>
                 <button type="submit" class="btn-primary">Log In</button>
                 <p class="auth-switch" onclick="toggleAuth('register')">Need an account? Sign up</p>
@@ -35,8 +36,9 @@
                 <div class="form-group">
                     <input type="email" id="reg-email" class="input-field" placeholder="New Email" required>
                 </div>
-                <div class="form-group">
+                <div class="form-group password-wrapper">
                     <input type="password" id="reg-password" class="input-field" placeholder="New Password" required>
+                    <i class="fa-solid fa-eye-slash toggle-password" onclick="togglePassword('reg-password', this)"></i>
                 </div>
                 <button type="submit" class="btn-primary" style="background-color: var(--success-color);">Sign Up</button>
                 <p class="auth-switch" onclick="toggleAuth('login')">Have an account? Log In</p>
