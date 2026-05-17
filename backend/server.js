@@ -90,7 +90,7 @@ const allowedOrigins = [
 const corsOptions = {
     origin: (origin, callback) => {
         // Allow requests with no origin (like mobile apps or curl) or if origin is in the allowlist
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             console.warn(`[SECURITY] Blocked request from unauthorized origin: ${origin}`);
@@ -263,6 +263,14 @@ app.use(helmet({
             ],
         },
     },
+    strictTransportSecurity: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true
+    },
+    frameguard: { action: 'deny' },
+    noSniff: true,
+    hidePoweredBy: true
 }));
 
 // GLOBAL LIMITER
@@ -275,9 +283,11 @@ app.use(globalLimiter);
 
 // STRICT LIMITER (For Passwords, Codes, and Sensitive Actions)
 const authLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 Hour
-    max: 10,                   // 10 Attempts
-    message: "Too many failed attempts. Access locked for 1 hour."
+    windowMs: 15 * 60 * 1000, // 15 Minutes
+    max: 5,                   // 5 Attempts
+    message: "Too many failed attempts. Access locked for 15 minutes.",
+    standardHeaders: true,
+    legacyHeaders: false
 });
 
 // Apply to Login (Existing)
@@ -809,7 +819,7 @@ app.post('/api/register', [
 
     // Proceed (Your existing code)
     const { email, password } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 14);
     try {
         const user = await User.create({ email, password: hashedPassword });
         res.json({ status: 'ok' });
@@ -838,10 +848,31 @@ app.post('/api/login', [
     if (!valid) return res.status(400).json({ error: 'Invalid password' });
 
     // BUG 1 FIX: Added expiresIn so tokens are not valid forever
-    const token = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '2h', algorithm: 'HS256' });
+    const refreshToken = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '30d', algorithm: 'HS256' });
 
     // Send the role back to the frontend 
-    res.json({ token, role: user.role });
+    res.json({ token, refreshToken, role: user.role });
+});
+
+// Refresh Token
+app.post('/api/refresh-token', async (req, res) => {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(401).json({ error: 'Refresh token required' });
+
+    try {
+        const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+        const user = await User.findById(decoded.id).lean();
+        
+        if (!user || (decoded.tokenVersion !== undefined && user.tokenVersion !== decoded.tokenVersion)) {
+            return res.status(403).json({ error: 'Invalid refresh token' });
+        }
+
+        const newToken = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '2h', algorithm: 'HS256' });
+        res.json({ token: newToken });
+    } catch (err) {
+        res.status(403).json({ error: 'Invalid or expired refresh token' });
+    }
 });
 
 // Logout All Devices
@@ -884,7 +915,7 @@ app.post('/api/user-update', auth, [
         let updates = {};
         if (email) updates.email = email;
         if (homeTitle) updates.homeTitle = homeTitle;
-        if (password) updates.password = await bcrypt.hash(password, 10);
+        if (password) updates.password = await bcrypt.hash(password, 14);
 
         await User.findByIdAndUpdate(req.user.id, updates);
         res.json({ status: 'updated' });
@@ -1683,40 +1714,51 @@ app.get('/auth', (req, res) => {
 
 // OAUTH: Handle Login Form Submission
 app.post('/login-link', async (req, res) => {
-    // Debug Log: Check what the form sent back
-    console.log("Login Attempt Body:", req.body);
+    try {
+        // Debug Log: Check what the form sent back
+        console.log("Login Attempt Body:", req.body);
 
-    const { email, password, redirect_uri, state } = req.body;
+        let { email, password, redirect_uri, state } = req.body;
 
-    // SAFETY CHECK: If redirect_uri is missing, stop here.
-    if (!redirect_uri || redirect_uri === "undefined") {
-        return res.send("Error: Return address lost. Please go back to Google Home App and try again.");
+        if (!email || !password) {
+            return res.send("Email and password are required. Please go back and try again.");
+        }
+        
+        email = email.toLowerCase().trim();
+
+        // SAFETY CHECK: If redirect_uri is missing, stop here.
+        if (!redirect_uri || redirect_uri === "undefined") {
+            return res.send("Error: Return address lost. Please go back to Google Home App and try again.");
+        }
+
+        // BUG 9 FIX: Validate redirect_uri to prevent open redirect attacks.
+        // Only Google's official OAuth redirect domain is allowed.
+        const ALLOWED_REDIRECT_PREFIX = "https://oauth-redirect.googleusercontent.com";
+        if (!redirect_uri.startsWith(ALLOWED_REDIRECT_PREFIX)) {
+            return res.status(400).send("Error: Invalid redirect URI. This endpoint only accepts Google OAuth redirects.");
+        }
+
+        // Check credentials
+        const user = await User.findOne({ email });
+        if (!user || !(await bcrypt.compare(password, user.password))) {
+            return res.send("Invalid credentials. Please go back and try again.");
+        }
+
+        // SECURITY FIX (Issue 5): Sign auth code as a short-lived JWT instead of plain base64(userId).
+        // Plain base64 is trivially decodable — anyone with a MongoDB _id could forge a code.
+        const authCode = jwt.sign(
+            { uid: user._id.toString() },
+            process.env.JWT_SECRET,
+            { expiresIn: '5m' }   // Code valid for 5 minutes only
+        );
+
+        // Redirect back to Google
+        console.log(`Redirecting to: ${redirect_uri}`);
+        res.redirect(`${redirect_uri}?code=${encodeURIComponent(authCode)}&state=${state}`);
+    } catch (error) {
+        console.error("Login Link Error:", error);
+        res.status(500).send("Internal Server Error. Please try again later.");
     }
-
-    // BUG 9 FIX: Validate redirect_uri to prevent open redirect attacks.
-    // Only Google's official OAuth redirect domain is allowed.
-    const ALLOWED_REDIRECT_PREFIX = "https://oauth-redirect.googleusercontent.com";
-    if (!redirect_uri.startsWith(ALLOWED_REDIRECT_PREFIX)) {
-        return res.status(400).send("Error: Invalid redirect URI. This endpoint only accepts Google OAuth redirects.");
-    }
-
-    // Check credentials
-    const user = await User.findOne({ email });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-        return res.send("Invalid credentials. Please go back and try again.");
-    }
-
-    // SECURITY FIX (Issue 5): Sign auth code as a short-lived JWT instead of plain base64(userId).
-    // Plain base64 is trivially decodable — anyone with a MongoDB _id could forge a code.
-    const authCode = jwt.sign(
-        { uid: user._id.toString() },
-        process.env.JWT_SECRET,
-        { expiresIn: '5m' }   // Code valid for 5 minutes only
-    );
-
-    // Redirect back to Google
-    console.log(`Redirecting to: ${redirect_uri}`);
-    res.redirect(`${redirect_uri}?code=${encodeURIComponent(authCode)}&state=${state}`);
 });
 
 // OAUTH: Token Exchange
