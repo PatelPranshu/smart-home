@@ -558,6 +558,9 @@ mqttClient.on('message', async (topic, message) => {
                 emitDeviceUpdates(device.owner._id ? device.owner._id.toString() : device.owner.toString());
             }
 
+            // Skip History and Google Reporting if this is just a status check refresh
+            if (data.refresh) return;
+
             // BACKGROUND TASKS: Run History and Google reporting via queue
             BackgroundTaskQueue.enqueue(async () => {
                 // Log to History
@@ -969,6 +972,23 @@ app.get('/api/devices', auth, async (req, res) => {
         res.json(devices);
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch devices" });
+    }
+});
+
+// Request Device Status Refresh
+app.post('/api/devices/refresh', auth, async (req, res) => {
+    try {
+        const devices = await Device.find({ owner: req.user.id }).lean();
+        if (!devices || devices.length === 0) return res.json({ status: 'no_devices' });
+
+        devices.forEach(device => {
+            mqttClient.publish(`devices/${device.deviceId}/check`, '1');
+        });
+
+        res.json({ status: 'refresh_requested' });
+    } catch (err) {
+        console.error("Refresh Error:", err);
+        res.status(500).json({ error: "Failed to request refresh" });
     }
 });
 

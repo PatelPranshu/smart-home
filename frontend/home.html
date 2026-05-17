@@ -44,7 +44,12 @@
 
         <div class="content-area no-scroll">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <h3 class="section-title" style="margin-bottom: 0;">Devices</h3>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <h3 class="section-title" style="margin-bottom: 0;">Devices</h3>
+                    <button id="refresh-btn" onclick="refreshDevices()" style="background: rgba(255, 255, 255, 0.18); border: 1px solid rgba(255, 255, 255, 0.3); cursor: pointer; color: #ffffff; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; transition: all 0.3s ease; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding: 0; outline: none;" onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'; this.style.boxShadow='0 6px 14px rgba(0, 0, 0, 0.2)';" onmouseout="this.style.background='rgba(255, 255, 255, 0.18)'; this.style.boxShadow='0 4px 10px rgba(0, 0, 0, 0.15)';">
+                        <i class="fa-solid fa-arrows-rotate" style="font-size: 0.9rem;"></i>
+                    </button>
+                </div>
                 <div class="view-toggles">
                     <div id="btn-list" onclick="setView('list')" class="toggle-btn">
                         <i class="fa-solid fa-list"></i>

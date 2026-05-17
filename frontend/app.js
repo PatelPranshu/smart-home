@@ -202,6 +202,33 @@ async function initHome() {
 
     fetchDevices();
 
+    // --- NEW: Refresh Devices Button Handler ---
+    window.refreshDevices = async () => {
+        const btn = document.getElementById('refresh-btn');
+        if (btn) {
+            btn.style.transform = 'rotate(180deg)';
+        }
+        try {
+            const res = await fetch(`${API_URL}/devices/refresh`, {
+                method: 'POST',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                showToast('Status check requested from devices', 'info');
+            } else {
+                showToast('Failed to request device refresh', 'error');
+            }
+        } catch (err) {
+            console.error('Refresh failed', err);
+            showToast('Server Error', 'error');
+        }
+        setTimeout(() => {
+            if (btn) {
+                btn.style.transform = 'rotate(0deg)';
+            }
+        }, 500);
+    };
+
     // SOCKET.IO REAL-TIME CONNECTION
     // Make socket global so it persists and can be reconnected on server change
     function connectSocket() {

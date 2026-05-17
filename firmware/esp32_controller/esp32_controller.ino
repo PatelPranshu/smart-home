@@ -71,6 +71,7 @@ String wifiTopic;
 String otaTopic;      // [NEW] OTA Topic
 String fanSpeedTopic; // [NEW] Fan Speed Topic
 String versionTopic;  // [NEW] Firmware Version Topic
+String checkTopic;    // [NEW] Check Status Topic
 
 unsigned long lastWifiCheck = 0;
 
@@ -114,7 +115,6 @@ unsigned long debounceDelay = 50;
 unsigned long lastMqttAttempt = 0;
 unsigned long currentBackoff = 5000; // Start backoff at 5s
 int mqttRetryCount = 0;
-unsigned long lastHeartbeat = 0;
 unsigned long touchStartTime = 0;
 
 // LED STATE MANAGEMENT
@@ -137,6 +137,8 @@ const int FEEDBACK_DURATION = 100;
 // Multithreading
 TaskHandle_t SwitchTask;
 bool mqttNeedsUpdate[NUM_RELAYS] = {false};
+volatile bool triggerFullSync = false; // Flag for full status refresh
+volatile bool startupDelayComplete = false; // Flag for 3-second boot delay
 
 // --- HELPER: SAVE & LOAD STATE ---
 void saveState(int id, bool state) {
@@ -149,8 +151,8 @@ void loadState() {
   for (int i = 0; i < NUM_RELAYS; i++) {
     char key[10];
     sprintf(key, "sw_%d", i);
+    // Load the saved state from memory, but DO NOT turn on relays yet
     relayState[i] = preferences.getBool(key, false);
-    digitalWrite(relayPins[i], relayState[i] ? LOW : HIGH);
   }
 }
 
@@ -207,25 +209,27 @@ void switchTaskCode(void *PvParameters) {
     }
 
     // --- NORMAL SWITCH LOGIC ---
-    for (int i = 0; i < NUM_RELAYS; i++) {
-      int reading = digitalRead(switchPins[i]);
-
-      if (reading != lastSwitchState[i])
-        lastDebounceTime[i] = millis();
-
-      if ((millis() - lastDebounceTime[i]) > debounceDelay) {
-        if (reading != stableState[i]) {
-          stableState[i] = reading;
-
-          triggerSwitchFeedback = true;
-          relayState[i] = !relayState[i];
-          digitalWrite(relayPins[i], relayState[i] ? LOW : HIGH);
-
-          saveNeeded[i] = true;
-          mqttNeedsUpdate[i] = true;
+    if (startupDelayComplete) {
+      for (int i = 0; i < NUM_RELAYS; i++) {
+        int reading = digitalRead(switchPins[i]);
+  
+        if (reading != lastSwitchState[i])
+          lastDebounceTime[i] = millis();
+  
+        if ((millis() - lastDebounceTime[i]) > debounceDelay) {
+          if (reading != stableState[i]) {
+            stableState[i] = reading;
+  
+            triggerSwitchFeedback = true;
+            relayState[i] = !relayState[i];
+            digitalWrite(relayPins[i], relayState[i] ? LOW : HIGH);
+  
+            saveNeeded[i] = true;
+            mqttNeedsUpdate[i] = true;
+          }
         }
+        lastSwitchState[i] = reading;
       }
-      lastSwitchState[i] = reading;
     }
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
@@ -340,6 +344,13 @@ void callback(char *topic, byte *payload, unsigned int length) {
     if (downloadUrl) {
       performOTA(String(downloadUrl));
     }
+    return;
+  }
+
+  // 1.5. Check Status Command
+  if (String(topic) == checkTopic) {
+    Serial.println("[MQTT] Status Check Requested");
+    triggerFullSync = true;
     return;
   }
 
@@ -499,6 +510,21 @@ void setup() {
   xTaskCreatePinnedToCore(switchTaskCode, "SwitchTask", 10000, NULL, 1,
                           &SwitchTask, 0);
 
+  Serial.println("[Boot] Load balancing: Waiting 3 seconds before restoring lights...");
+  delay(3000);
+  
+  // Restore states with stagger to prevent current surge
+  for(int i=0; i<NUM_RELAYS; i++) {
+    if (relayState[i]) {
+      digitalWrite(relayPins[i], LOW);
+      delay(250); // Stagger turn-on by 250ms per active relay
+    } else {
+      digitalWrite(relayPins[i], HIGH);
+    }
+  }
+  startupDelayComplete = true;
+  Serial.println("[Boot] Lights restored. Switches active.");
+
   WiFi.mode(WIFI_STA);
   delay(100);
 
@@ -517,6 +543,7 @@ void setup() {
   otaTopic = "devices/" + uniqueDeviceId + "/ota";
   fanSpeedTopic = "devices/" + uniqueDeviceId + "/fan-speed";
   versionTopic = "devices/" + uniqueDeviceId + "/version";
+  checkTopic = "devices/" + uniqueDeviceId + "/check";
 
   dht.begin();
 
@@ -536,7 +563,7 @@ void setup() {
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
     client.setBufferSize(4096);
-    client.setKeepAlive(15);
+    client.setKeepAlive(5);
   }
 
   // START WATCHDOG HERE (Final Step)
@@ -594,6 +621,7 @@ void handleMQTT() {
       client.subscribe(wifiTopic.c_str());
       client.subscribe(otaTopic.c_str());
       client.subscribe(fanSpeedTopic.c_str()); // [FIX] Subscribe to fan speed
+      client.subscribe(checkTopic.c_str());
 
       // 3. Request state sync from server (server is source of truth)
       // Server will push correct state via commandTopic for each switch
@@ -660,10 +688,22 @@ void loop() {
           client.publish(updateTopic.c_str(), buffer);
         }
       }
-      // Send Heartbeat every 30s
-      if (millis() - lastHeartbeat > 30000) {
-        lastHeartbeat = millis();
+      
+      // Process Full Sync Request from Refresh Button
+      if (triggerFullSync) {
+        triggerFullSync = false;
         client.publish(statusTopic.c_str(), "online", true);
+        for (int i = 0; i < NUM_RELAYS; i++) {
+          StaticJsonDocument<256> doc;
+          doc["switchId"] = i;
+          doc["state"] = relayState[i];
+          doc["refresh"] = true;
+          char buffer[256];
+          serializeJson(doc, buffer);
+          client.publish(updateTopic.c_str(), buffer);
+          client.loop(); // Prevent buffer overflow
+          delay(10);
+        }
       }
 
       // Report firmware version every 5 minutes
