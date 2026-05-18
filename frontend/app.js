@@ -310,13 +310,34 @@ async function initHome() {
         }
     }
 
-    // Initial socket connection
-    connectSocket();
-
-    // Reconnect socket when the active backend server changes (via apiConfig.js failover)
-    window.addEventListener('activeServerChanged', () => {
-        console.log('[Socket.io] Server changed, reconnecting socket...');
+    // Initial socket connection (only if visible)
+    if (document.visibilityState === 'visible') {
         connectSocket();
+    }
+
+    // Reconnect socket when the active backend server changes (via apiConfig.js failover) (only if visible)
+    window.addEventListener('activeServerChanged', () => {
+        if (document.visibilityState === 'visible') {
+            console.log('[Socket.io] Server changed, reconnecting socket...');
+            connectSocket();
+        }
+    });
+
+    // Smart Connection Management using Page Visibility API
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            if (window.smartSocket) {
+                console.log('[Socket.io] Tab hidden, disconnecting socket to save server RAM/CPU');
+                window.smartSocket.disconnect();
+            }
+        } else if (document.visibilityState === 'visible') {
+            console.log('[Socket.io] Tab visible, performing zero-lag HTTP update...');
+            fetchDevices();
+            if (window.smartSocket && !window.smartSocket.connected) {
+                console.log('[Socket.io] Socket was disconnected, reconnecting...');
+                connectSocket();
+            }
+        }
     });
 
     window.currentDeviceId = null;
