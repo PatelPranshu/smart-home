@@ -199,7 +199,7 @@ io.on('connection', (socket) => {
     // Allow frontend to request a fresh device snapshot on reconnect
     socket.on('request_devices', async () => {
         try {
-            await emitDeviceUpdates(userId);
+            await emitDeviceUpdates(userId, true); // true = emit locally only, no broadcast
         } catch (err) {
             console.error('[Socket.io] request_devices error:', err.message);
         }
@@ -211,7 +211,7 @@ io.on('connection', (socket) => {
 });
 
 // Helper Function: Emit Real-Time Updates
-async function emitDeviceUpdates(userIdStr) {
+async function emitDeviceUpdates(userIdStr, isBroadcast = false) {
     try {
         const devices = await Device.find({ owner: userIdStr }).lean();
 
@@ -233,6 +233,11 @@ async function emitDeviceUpdates(userIdStr) {
         setTimeout(() => deviceCache.delete(cacheKey), 2000);
 
         io.to(userIdStr.toString()).emit('devices_updated', devices);
+
+        // --- NEW: Broadcast to other servers in the cluster via MQTT ---
+        if (!isBroadcast && mqttClient && mqttClient.connected) {
+            mqttClient.publish('backend/broadcast/devices_updated', JSON.stringify({ userId: userIdStr.toString() }));
+        }
     } catch (err) {
         console.error('[Socket.io] Emitting devices failed:', err.message);
     }
@@ -486,6 +491,9 @@ mqttClient.on('connect', () => {
     mqttClient.subscribe('$share/backend/devices/+/status');
     mqttClient.subscribe('$share/backend/devices/+/sensor');
     mqttClient.subscribe('$share/backend/devices/+/version'); // OTA: Firmware version reports
+
+    // Subscribe to internal cluster broadcast events (NO $share prefix, so all nodes receive this)
+    mqttClient.subscribe('backend/broadcast/devices_updated');
 });
 
 const sensorLastWritten = new Map();
@@ -505,6 +513,16 @@ mqttClient.on('message', async (topic, message) => {
 
     // [CRITICAL] Global try-catch to prevent server crashes on bad data
     try {
+        // --- Inter-Node Communication for Real-time UI Updates ---
+        if (topic === 'backend/broadcast/devices_updated') {
+            const data = safeParse(message, topic);
+            if (data && data.userId) {
+                // Emit to locally connected sockets ONLY (isBroadcast = true to prevent infinite loop)
+                emitDeviceUpdates(data.userId, true);
+            }
+            return;
+        }
+
         const parts = topic.split('/');
 
         // Safety Check: Ensure topic format is correct (devices/ID/type)
