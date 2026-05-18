@@ -1,3 +1,7 @@
+# ==========================================
+#         SMART HOME SYSTEM - GITIGNORE
+# ==========================================
+
 # --- Node.js & Backend ---
 node_modules/
 npm-debug.log
@@ -19,14 +23,20 @@ backend/create_device.js
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+$RECYCLE.BIN/
 
 # --- Editors & IDEs ---
 .vscode/
 .idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
 *.sublime-project
 *.sublime-workspace
+*.iml
 
-# --- Arduino & ESP32 ---
+# --- Arduino & ESP32 firmware ---
 # Temporary build files
 build/
 .pio/
@@ -44,10 +54,46 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# --- esp32 provisioning tool ---
+# --- ESP32 provisioning tool ---
 firmware/Provisioning_Tool/
 
+# --- Flutter & Dart Specifics (Handles "Diviot app") ---
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/build/
+**/build_signature
+**/.metadata
 
+# Android Native Build Outputs
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
+**/android/app/src/main/assets/
+**/android/app/src/main/java/io/flutter/plugins/
 
-#Diviot app
-/Diviot app
+# iOS Native Build Outputs
+**/ios/Flutter/Ephemerals/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/Flutter.podspec
+**/ios/Runner/GeneratedPluginRegistrant.h
+**/ios/Runner/GeneratedPluginRegistrant.m
+
+# --- Credentials & Keystore Secrets (CRITICAL SECURITY) ---
+*.keystore
+*.jks
+*.p12
+*.pem
+key.properties
+google-services.json
+GoogleService-Info.plist
+
+# Google Cloud Service Account JSON Key Files
+*service-account*.json
+*service_account*.json
+*smarthubpranshu*.json
+smarthubpranshu*.json
