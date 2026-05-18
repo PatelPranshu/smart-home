@@ -136,7 +136,7 @@ const int FEEDBACK_DURATION = 100;
 
 // Multithreading
 TaskHandle_t SwitchTask;
-bool mqttNeedsUpdate[NUM_RELAYS] = {false};
+volatile bool mqttNeedsUpdate[NUM_RELAYS] = {false};
 volatile bool triggerFullSync = false; // Flag for full status refresh
 volatile bool startupDelayComplete = false; // Flag for 3-second boot delay
 

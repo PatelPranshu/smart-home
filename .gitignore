@@ -46,3 +46,8 @@ yarn-error.log*
 
 # --- esp32 provisioning tool ---
 firmware/Provisioning_Tool/
+
+
+
+#Diviot app
+/Diviot app
