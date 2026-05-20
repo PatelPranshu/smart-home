@@ -425,259 +425,264 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: Stack(
         children: [
-          ListView(
-            padding: EdgeInsets.fromLTRB(16, serverProvider.isReverting ? 40 : 0, 16, 120),
-            children: [
-              _buildGroupTitle('Account'),
-              _buildCardContainer(
+          Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 800),
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(16, serverProvider.isReverting ? 40 : 0, 16, 120),
                 children: [
-                  _buildListTile(
-                    icon: Icons.person_rounded,
-                    iconColor: Colors.blue,
-                    title: authProvider.email ?? 'Loading...',
-                    subtitle: 'User Account',
-                  ),
-                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
-                  _buildListTile(
-                    icon: Icons.lock_rounded,
-                    iconColor: Colors.amber,
-                    title: 'Change Password',
-                    onTap: _showChangePasswordModal,
-                  ),
-                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _titleController,
-                            style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.w600),
-                            decoration: InputDecoration(
-                              hintText: 'Home Title',
-                              hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.black45),
-                              filled: true,
-                              fillColor: isDark ? Colors.black26 : Colors.black.withOpacity(0.05),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide.none,
-                              ),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                            ),
-                          ),
-                        ),
-                        SizedBox(width: 12),
-                        ElevatedButton(
-                          onPressed: () async {
-                            if (_titleController.text.isEmpty) {
-                              showToast(context, 'Title cannot be empty', isError: true);
-                              return;
-                            }
-                            try {
-                              await _apiService.updateUser({'homeTitle': _titleController.text});
-                              showToast(context, 'Dashboard title saved!');
-                              if (context.mounted) {
-                                Provider.of<AuthProvider>(context, listen: false).fetchUserProfile();
-                              }
-                            } catch(e) {
-                              showToast(context, 'Failed to save title', isError: true);
-                            }
-                          },
-                          child: Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue, 
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14)
-                          ),
-                        )
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-
-              _buildGroupTitle('System Preferences'),
-              _buildCardContainer(
-                children: [
-                  _buildListTile(
-                    icon: Icons.cloud_download_rounded,
-                    iconColor: Colors.green,
-                    title: 'Automatic Updates',
-                    subtitle: _autoUpdate ? 'Silently updating in background' : 'Manual notifications enabled',
-                    trailing: Switch(
-                      value: _autoUpdate,
-                      onChanged: (val) async {
-                        try {
-                          await _apiService.setUpdatePreference(val ? 'auto' : 'manual');
-                          setState(() => _autoUpdate = val);
-                          showToast(context, val ? 'Auto updates enabled' : 'Auto updates disabled');
-                        } catch(e) {
-                          showToast(context, 'Failed to update preference', isError: true);
-                        }
-                      },
-                      activeColor: Colors.green,
-                    ),
-                  ),
-                  if (_isGoogleLinked) ...[
-                    Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
-                    _buildListTile(
-                      icon: Icons.home_work_rounded,
-                      iconColor: Colors.indigo,
-                      title: 'Google Home Access',
-                      subtitle: 'Allow voice commands',
-                      trailing: Switch(
-                        value: _googleHome,
-                        onChanged: (val) async {
-                          try {
-                            await _apiService.setGoogleStatus(val);
-                            setState(() => _googleHome = val);
-                            showToast(context, val ? 'Google Home Enabled' : 'Google Home Disabled');
-                          } catch(e) {
-                            showToast(context, 'Failed to update Google Home status', isError: true);
-                          }
-                        },
-                        activeColor: Colors.indigo,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-
-              _buildGroupTitle('My Devices'),
-              _buildCardContainer(
-                children: [
-                  ...deviceProvider.devices.map((device) => Column(
+                  _buildGroupTitle('Account'),
+                  _buildCardContainer(
                     children: [
-                      ListTile(
-                        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                        leading: Container(
-                          padding: EdgeInsets.all(10),
-                          decoration: BoxDecoration(color: Colors.grey.withOpacity(0.2), shape: BoxShape.circle),
-                          child: Icon(Icons.memory_rounded, color: isDark ? Colors.white : Colors.black87, size: 24),
-                        ),
-                        title: Text(device.deviceId, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
-                        subtitle: Row(
-                          children: [
-                            Container(
-                              width: 8, height: 8,
-                              decoration: BoxDecoration(color: device.isOnline ? Colors.green : Colors.red, shape: BoxShape.circle)
-                            ),
-                            SizedBox(width: 6),
-                            Text(device.isOnline ? 'Online' : 'Offline', style: TextStyle(fontSize: 14, color: isDark ? Colors.white60 : Colors.black54)),
-                          ],
-                        ),
-                        trailing: IconButton(
-                          icon: Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                          onPressed: () => _showRemoveDeviceModal(device.deviceId),
-                        ),
+                      _buildListTile(
+                        icon: Icons.person_rounded,
+                        iconColor: Colors.blue,
+                        title: authProvider.email ?? 'Loading...',
+                        subtitle: 'User Account',
                       ),
                       Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
-                    ],
-                  )).toList(),
-                  _buildListTile(
-                    icon: Icons.add_circle_rounded,
-                    iconColor: Colors.teal,
-                    title: 'Add New Device',
-                    onTap: _showAddDeviceModal,
-                  ),
-                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
-                  _buildListTile(
-                    icon: Icons.wifi_rounded,
-                    iconColor: Colors.deepOrange,
-                    title: 'Update Wi-Fi Credentials',
-                    onTap: _showWifiModal,
-                  ),
-                ],
-              ),
-
-              _buildGroupTitle('Server Configuration'),
-              _buildCardContainer(
-                children: [
-                  _buildListTile(
-                    icon: Icons.dns_rounded,
-                    iconColor: serverProvider.isHealthy ? Colors.green : Colors.red,
-                    title: 'Active Server',
-                    subtitle: serverProvider.activeServer.replaceAll('/api', ''),
-                    trailing: Container(
-                      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: serverProvider.isHealthy ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15), 
-                        borderRadius: BorderRadius.circular(12)
+                      _buildListTile(
+                        icon: Icons.lock_rounded,
+                        iconColor: Colors.amber,
+                        title: 'Change Password',
+                        onTap: _showChangePasswordModal,
                       ),
-                      child: Text(
-                        serverProvider.isHealthy ? 'Connected' : 'Offline', 
-                        style: TextStyle(color: serverProvider.isHealthy ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 12)
-                      ),
-                    ),
-                  ),
-                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
-                  Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Column(
-                      children: [
-                        Row(
+                      Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        child: Row(
                           children: [
                             Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => serverProvider.setServerMode('auto'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: serverProvider.mode == 'auto' ? Colors.blue : (isDark ? Colors.white12 : Colors.black12),
-                                  foregroundColor: serverProvider.mode == 'auto' ? Colors.white : (isDark ? Colors.white : Colors.black87),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                  padding: EdgeInsets.symmetric(vertical: 12)
+                              child: TextField(
+                                controller: _titleController,
+                                style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.w600),
+                                decoration: InputDecoration(
+                                  hintText: 'Home Title',
+                                  hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.black45),
+                                  filled: true,
+                                  fillColor: isDark ? Colors.black26 : Colors.black.withOpacity(0.05),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                                 ),
-                                child: Text('Automatic', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                             ),
                             SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => serverProvider.setServerMode('manual'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: serverProvider.mode == 'manual' ? Colors.blue : (isDark ? Colors.white12 : Colors.black12),
-                                  foregroundColor: serverProvider.mode == 'manual' ? Colors.white : (isDark ? Colors.white : Colors.black87),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                  padding: EdgeInsets.symmetric(vertical: 12)
-                                ),
-                                child: Text('Manual', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ElevatedButton(
+                              onPressed: () async {
+                                if (_titleController.text.isEmpty) {
+                                  showToast(context, 'Title cannot be empty', isError: true);
+                                  return;
+                                }
+                                try {
+                                  await _apiService.updateUser({'homeTitle': _titleController.text});
+                                  showToast(context, 'Dashboard title saved!');
+                                  if (context.mounted) {
+                                    Provider.of<AuthProvider>(context, listen: false).fetchUserProfile();
+                                  }
+                                } catch(e) {
+                                  showToast(context, 'Failed to save title', isError: true);
+                                }
+                              },
+                              child: Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue, 
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 14)
                               ),
-                            ),
+                            )
                           ],
                         ),
-                        if (serverProvider.mode == 'manual') ...[
-                          SizedBox(height: 16),
-                          ...ServerProvider.SERVERS.asMap().entries.map((entry) {
-                            final idx = entry.key;
-                            final url = entry.value;
-                            final isSelected = serverProvider.activeServer == url;
-                            return Container(
-                              margin: EdgeInsets.only(top: 8),
-                              decoration: BoxDecoration(
-                                color: isSelected ? Colors.blue.withOpacity(0.1) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(12)
-                              ),
-                              child: ListTile(
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                title: Text(url.replaceAll('/api', ''), style: TextStyle(fontSize: 14, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isDark ? Colors.white : Colors.black87)),
-                                subtitle: Text('Server ${idx + 1}', style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
-                                trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Colors.blue) : null,
-                                onTap: () {
-                                  serverProvider.setManualServer(url);
-                                  showToast(context, 'Switched to Server ${idx + 1}');
-                                },
-                              ),
-                            );
-                          }).toList(),
-                        ],
+                      ),
+                    ],
+                  ),
+
+                  _buildGroupTitle('System Preferences'),
+                  _buildCardContainer(
+                    children: [
+                      _buildListTile(
+                        icon: Icons.cloud_download_rounded,
+                        iconColor: Colors.green,
+                        title: 'Automatic Updates',
+                        subtitle: _autoUpdate ? 'Silently updating in background' : 'Manual notifications enabled',
+                        trailing: Switch(
+                          value: _autoUpdate,
+                          onChanged: (val) async {
+                            try {
+                              await _apiService.setUpdatePreference(val ? 'auto' : 'manual');
+                              setState(() => _autoUpdate = val);
+                              showToast(context, val ? 'Auto updates enabled' : 'Auto updates disabled');
+                            } catch(e) {
+                              showToast(context, 'Failed to update preference', isError: true);
+                            }
+                          },
+                          activeColor: Colors.green,
+                        ),
+                      ),
+                      if (_isGoogleLinked) ...[
+                        Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
+                        _buildListTile(
+                          icon: Icons.home_work_rounded,
+                          iconColor: Colors.indigo,
+                          title: 'Google Home Access',
+                          subtitle: 'Allow voice commands',
+                          trailing: Switch(
+                            value: _googleHome,
+                            onChanged: (val) async {
+                              try {
+                                await _apiService.setGoogleStatus(val);
+                                setState(() => _googleHome = val);
+                                showToast(context, val ? 'Google Home Enabled' : 'Google Home Disabled');
+                              } catch(e) {
+                                showToast(context, 'Failed to update Google Home status', isError: true);
+                              }
+                            },
+                            activeColor: Colors.indigo,
+                          ),
+                        ),
                       ],
-                    ),
+                    ],
+                  ),
+
+                  _buildGroupTitle('My Devices'),
+                  _buildCardContainer(
+                    children: [
+                      ...deviceProvider.devices.map((device) => Column(
+                        children: [
+                          ListTile(
+                            contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                            leading: Container(
+                              padding: EdgeInsets.all(10),
+                              decoration: BoxDecoration(color: Colors.grey.withOpacity(0.2), shape: BoxShape.circle),
+                              child: Icon(Icons.memory_rounded, color: isDark ? Colors.white : Colors.black87, size: 24),
+                            ),
+                            title: Text(device.deviceId, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+                            subtitle: Row(
+                              children: [
+                                Container(
+                                  width: 8, height: 8,
+                                  decoration: BoxDecoration(color: device.isOnline ? Colors.green : Colors.red, shape: BoxShape.circle)
+                                ),
+                                SizedBox(width: 6),
+                                Text(device.isOnline ? 'Online' : 'Offline', style: TextStyle(fontSize: 14, color: isDark ? Colors.white60 : Colors.black54)),
+                              ],
+                            ),
+                            trailing: IconButton(
+                              icon: Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                              onPressed: () => _showRemoveDeviceModal(device.deviceId),
+                            ),
+                          ),
+                          Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
+                        ],
+                      )).toList(),
+                      _buildListTile(
+                        icon: Icons.add_circle_rounded,
+                        iconColor: Colors.teal,
+                        title: 'Add New Device',
+                        onTap: _showAddDeviceModal,
+                      ),
+                      Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
+                      _buildListTile(
+                        icon: Icons.wifi_rounded,
+                        iconColor: Colors.deepOrange,
+                        title: 'Update Wi-Fi Credentials',
+                        onTap: _showWifiModal,
+                      ),
+                    ],
+                  ),
+
+                  _buildGroupTitle('Server Configuration'),
+                  _buildCardContainer(
+                    children: [
+                      _buildListTile(
+                        icon: Icons.dns_rounded,
+                        iconColor: serverProvider.isHealthy ? Colors.green : Colors.red,
+                        title: 'Active Server',
+                        subtitle: serverProvider.activeServer.replaceAll('/api', ''),
+                        trailing: Container(
+                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: serverProvider.isHealthy ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15), 
+                            borderRadius: BorderRadius.circular(12)
+                          ),
+                          child: Text(
+                            serverProvider.isHealthy ? 'Connected' : 'Offline', 
+                            style: TextStyle(color: serverProvider.isHealthy ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 12)
+                          ),
+                        ),
+                      ),
+                      Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12, indent: 64),
+                      Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: () => serverProvider.setServerMode('auto'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: serverProvider.mode == 'auto' ? Colors.blue : (isDark ? Colors.white12 : Colors.black12),
+                                      foregroundColor: serverProvider.mode == 'auto' ? Colors.white : (isDark ? Colors.white : Colors.black87),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      padding: EdgeInsets.symmetric(vertical: 12)
+                                    ),
+                                    child: Text('Automatic', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: () => serverProvider.setServerMode('manual'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: serverProvider.mode == 'manual' ? Colors.blue : (isDark ? Colors.white12 : Colors.black12),
+                                      foregroundColor: serverProvider.mode == 'manual' ? Colors.white : (isDark ? Colors.white : Colors.black87),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      padding: EdgeInsets.symmetric(vertical: 12)
+                                    ),
+                                    child: Text('Manual', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (serverProvider.mode == 'manual') ...[
+                              SizedBox(height: 16),
+                              ...ServerProvider.SERVERS.asMap().entries.map((entry) {
+                                final idx = entry.key;
+                                final url = entry.value;
+                                final isSelected = serverProvider.activeServer == url;
+                                return Container(
+                                  margin: EdgeInsets.only(top: 8),
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? Colors.blue.withOpacity(0.1) : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(12)
+                                  ),
+                                  child: ListTile(
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    title: Text(url.replaceAll('/api', ''), style: TextStyle(fontSize: 14, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isDark ? Colors.white : Colors.black87)),
+                                    subtitle: Text('Server ${idx + 1}', style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
+                                    trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Colors.blue) : null,
+                                    onTap: () {
+                                      serverProvider.setManualServer(url);
+                                      showToast(context, 'Switched to Server ${idx + 1}');
+                                    },
+                                  ),
+                                );
+                              }).toList(),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
           
           if (serverProvider.isReverting)

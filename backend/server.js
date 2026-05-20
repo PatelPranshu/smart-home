@@ -861,16 +861,27 @@ app.post('/api/login', [
     if (!errors.isEmpty()) {
         return res.status(400).json({ error: errors.array()[0].msg });
     }
-    const { email, password } = req.body;
+    const { email, password, isMobile } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ error: 'User not found' });
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ error: 'Invalid password' });
 
-    // BUG 1 FIX: Added expiresIn so tokens are not valid forever
-    const token = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '2h', algorithm: 'HS256' });
-    const refreshToken = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '30d', algorithm: 'HS256' });
+    // For mobile client logins, tokens do not expire on the server side (lifetime access)
+    const tokenOptions = isMobile ? { algorithm: 'HS256' } : { expiresIn: '2h', algorithm: 'HS256' };
+    const refreshOptions = isMobile ? { algorithm: 'HS256' } : { expiresIn: '30d', algorithm: 'HS256' };
+
+    const token = jwt.sign(
+        { id: user._id, tokenVersion: user.tokenVersion || 0, isMobile: !!isMobile }, 
+        process.env.JWT_SECRET, 
+        tokenOptions
+    );
+    const refreshToken = jwt.sign(
+        { id: user._id, tokenVersion: user.tokenVersion || 0, isMobile: !!isMobile }, 
+        process.env.JWT_SECRET, 
+        refreshOptions
+    );
 
     // Send the role back to the frontend 
     res.json({ token, refreshToken, role: user.role });
@@ -889,7 +900,12 @@ app.post('/api/refresh-token', async (req, res) => {
             return res.status(403).json({ error: 'Invalid refresh token' });
         }
 
-        const newToken = jwt.sign({ id: user._id, tokenVersion: user.tokenVersion || 0 }, process.env.JWT_SECRET, { expiresIn: '2h', algorithm: 'HS256' });
+        const newTokenOptions = decoded.isMobile ? { algorithm: 'HS256' } : { expiresIn: '2h', algorithm: 'HS256' };
+        const newToken = jwt.sign(
+            { id: user._id, tokenVersion: user.tokenVersion || 0, isMobile: !!decoded.isMobile }, 
+            process.env.JWT_SECRET, 
+            newTokenOptions
+        );
         res.json({ token: newToken });
     } catch (err) {
         res.status(403).json({ error: 'Invalid or expired refresh token' });

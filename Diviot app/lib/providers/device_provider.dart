@@ -1,8 +1,14 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/api_service.dart';
 import '../models/models.dart';
 import '../api_config.dart';
+import '../main.dart';
+import '../utils/ui_utils.dart';
 
 class DeviceProvider with ChangeNotifier {
   final ApiService _apiService = ApiService();
@@ -11,23 +17,89 @@ class DeviceProvider with ChangeNotifier {
   IO.Socket? _socket;
   String? _connectedUrl; // Track which server URL socket is connected to
   
+  bool _isPhoneOffline = false;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _firstConnectivityCheck = true;
+
   List<Device> get devices => _devices;
   bool get isLoading => _isLoading;
+  bool get isPhoneOffline => _isPhoneOffline;
+
+  DeviceProvider() {
+    loadCachedDevices();
+    _initConnectivity();
+  }
+
+  void _initConnectivity() {
+    // Check initial status on startup
+    Connectivity().checkConnectivity().then((results) {
+      _isPhoneOffline = results.contains(ConnectivityResult.none) || results.isEmpty;
+      if (_isPhoneOffline) {
+        _showConnectivityToast("You are offline", isError: true);
+      }
+      _firstConnectivityCheck = false;
+      notifyListeners();
+    });
+
+    // Listen for live connection changes
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
+      final wasOffline = _isPhoneOffline;
+      _isPhoneOffline = results.contains(ConnectivityResult.none) || results.isEmpty;
+
+      if (_isPhoneOffline && !wasOffline) {
+        _showConnectivityToast("You are offline", isError: true);
+      } else if (!_isPhoneOffline && wasOffline && !_firstConnectivityCheck) {
+        _showConnectivityToast("You are online", isError: false);
+      }
+      _firstConnectivityCheck = false;
+      notifyListeners();
+    });
+  }
+
+  void _showConnectivityToast(String message, {required bool isError}) {
+    if (navigatorKey.currentContext != null) {
+      showToast(navigatorKey.currentContext!, message, isError: isError);
+    }
+  }
+
+  @override
+  void dispose() {
+    _connectivitySubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> loadCachedDevices() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedData = prefs.getString('cached_devices');
+      if (cachedData != null) {
+        final List<dynamic> jsonList = jsonDecode(cachedData);
+        _devices = jsonList.map((json) => Device.fromJson(json)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      print('Error loading cached devices: $e');
+    }
+  }
 
   /// Fetches devices via HTTP. Used for initial load and manual refresh only.
   /// Socket.io handles all subsequent real-time updates automatically.
   Future<void> fetchDevices({bool showLoading = true}) async {
-    if (showLoading) {
+    final shouldShowSpinner = showLoading && _devices.isEmpty;
+    if (shouldShowSpinner) {
       _isLoading = true;
       notifyListeners();
     }
     try {
       final data = await _apiService.getDevices();
       _devices = data.map((json) => Device.fromJson(json)).toList();
+      
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_devices', jsonEncode(data));
     } catch (e) {
       print('Error fetching devices: $e');
     }
-    if (showLoading) {
+    if (shouldShowSpinner) {
       _isLoading = false;
     }
     notifyListeners();
@@ -124,6 +196,10 @@ class DeviceProvider with ChangeNotifier {
   /// Sends a hardware refresh request via HTTP, waits for MQTT round-trip,
   /// then fetches updated data. Used only for the manual refresh button.
   Future<void> refreshDevices() async {
+    if (_isPhoneOffline) {
+      _showConnectivityToast("Connect to internet", isError: true);
+      return;
+    }
     _isLoading = true;
     notifyListeners();
     try {
@@ -143,6 +219,12 @@ class DeviceProvider with ChangeNotifier {
   /// The server emits `devices_updated` after processing, which will
   /// confirm the state or revert it if there's an error.
   Future<void> toggleDevice(String deviceId, int switchId, bool state) async {
+    if (_isPhoneOffline) {
+      _showConnectivityToast("Connect to internet", isError: true);
+      notifyListeners(); // Reverts/snaps switch instantly back to default state
+      return;
+    }
+
     try {
       // Optimistic update for instant UI feedback
       for (var device in _devices) {

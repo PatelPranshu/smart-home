@@ -40,7 +40,11 @@ class ApiService {
     final response = await http.post(
       Uri.parse('${ApiConfig.currentServer}/login'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
+      body: jsonEncode({
+        'email': email,
+        'password': password,
+        'isMobile': true,
+      }),
     );
     
     final data = jsonDecode(response.body);

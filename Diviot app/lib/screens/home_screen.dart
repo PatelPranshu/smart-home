@@ -24,6 +24,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late ServerProvider _serverProvider;
   String? _lastServerUrl;
   Timer? _updateTimer;
+  Timer? _noDevicesTimer;
+  bool _showNoDevicesFound = false;
   String _viewMode = 'grid';
 
   @override
@@ -34,6 +36,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final deviceProvider = Provider.of<DeviceProvider>(context, listen: false);
       await deviceProvider.fetchDevices();
       await deviceProvider.initSocket();
+    });
+
+    // Show "No Accessories Found" only after a 30-second loading grace period
+    _noDevicesTimer = Timer(Duration(seconds: 30), () {
+      if (mounted) {
+        setState(() {
+          _showNoDevicesFound = true;
+        });
+      }
     });
 
     // Listen for server URL changes and reconnect socket
@@ -107,6 +118,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _serverProvider.removeListener(_onServerChanged);
     _updateTimer?.cancel();
+    _noDevicesTimer?.cancel();
     super.dispose();
   }
 
@@ -225,6 +237,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         
         if (allSwitches.isEmpty) {
+          if (!_showNoDevicesFound) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 16),
+                  Text(
+                    "Connecting and syncing devices...",
+                    style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            );
+          }
           return Center(
             child: SingleChildScrollView(
               padding: EdgeInsets.symmetric(horizontal: 32, vertical: 40),
@@ -330,18 +357,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           );
         }
 
+        final width = MediaQuery.of(context).size.width;
+        int crossAxisCount = 2;
+        if (width >= 900) {
+          crossAxisCount = 5;
+        } else if (width >= 600) {
+          crossAxisCount = 3;
+        }
+
         Widget layoutWidget = _viewMode == 'grid'
             ? GridView.count(
-                crossAxisCount: 2,
+                crossAxisCount: crossAxisCount,
                 padding: EdgeInsets.fromLTRB(20, 20, 20, 120),
                 crossAxisSpacing: 16,
                 mainAxisSpacing: 16,
                 childAspectRatio: 1.1,
                 children: allSwitches,
               )
-            : ListView(
-                padding: EdgeInsets.fromLTRB(20, 20, 20, 120),
-                children: allSwitches,
+            : Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: 800),
+                  child: ListView(
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, 120),
+                    children: allSwitches,
+                  ),
+                ),
               );
 
         final sensorCandidates = provider.devices.where((d) => d.temperature > 0 || d.humidity > 0);
@@ -635,7 +675,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             return Dialog(
               backgroundColor: isDark ? Colors.grey.shade900 : Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-              insetPadding: EdgeInsets.all(16),
+              insetPadding: EdgeInsets.symmetric(
+                horizontal: MediaQuery.of(context).size.width > 600
+                    ? (MediaQuery.of(context).size.width - 500) / 2
+                    : 16,
+                vertical: 24,
+              ),
               child: SingleChildScrollView(
                 child: Padding(
                   padding: EdgeInsets.all(24),

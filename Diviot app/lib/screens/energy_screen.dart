@@ -144,67 +144,72 @@ class _EnergyScreenState extends State<EnergyScreen> {
         ? Center(child: CircularProgressIndicator(color: Colors.white))
         : _history.isEmpty 
           ? Center(child: Text('No activity found.', style: TextStyle(color: Colors.white70, fontSize: 16)))
-          : ListView.builder(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 120),
-              itemCount: _history.length,
-              itemBuilder: (context, index) {
-                final item = _history[index];
-                final action = item['action'] ?? 'Unknown Action';
-                final isON = action.toString().contains('ON');
-                final isDark = Theme.of(context).brightness == Brightness.dark;
-                
-                final itemColor = _getColorForSwitch(context, item['switchName'], isON);
-                
-                return Container(
-                  margin: EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white.withOpacity(0.1) : Colors.white.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: ListTile(
-                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    leading: Container(
-                      padding: EdgeInsets.all(10),
+          : Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 800),
+                child: ListView.builder(
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, 120),
+                  itemCount: _history.length,
+                  itemBuilder: (context, index) {
+                    final item = _history[index];
+                    final action = item['action'] ?? 'Unknown Action';
+                    final isON = action.toString().contains('ON');
+                    final isDark = Theme.of(context).brightness == Brightness.dark;
+                    
+                    final itemColor = _getColorForSwitch(context, item['switchName'], isON);
+                    
+                    return Container(
+                      margin: EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                        color: isON ? itemColor.withOpacity(0.15) : Colors.red.withOpacity(0.15),
-                        shape: BoxShape.circle,
+                        color: isDark ? Colors.white.withOpacity(0.1) : Colors.white.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                      child: Icon(
-                        _getIconForSwitch(context, item['switchName']),
-                        color: isON ? itemColor : Colors.red,
-                        size: 24,
+                      child: ListTile(
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        leading: Container(
+                          padding: EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: isON ? itemColor.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            _getIconForSwitch(context, item['switchName']),
+                            color: isON ? itemColor : Colors.red,
+                            size: 24,
+                          ),
+                        ),
+                        title: Text(item['switchName'] ?? 'Unknown Device', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+                        subtitle: Text(action, style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)),
+                        trailing: item['timestamp'] != null 
+                          ? Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  _formatTime12h(DateTime.parse(item['timestamp']).toLocal()),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: isDark ? Colors.white70 : Colors.black87,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  _formatDate(DateTime.parse(item['timestamp']).toLocal()),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: isDark ? Colors.white38 : Colors.black45,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : SizedBox.shrink(),
                       ),
-                    ),
-                    title: Text(item['switchName'] ?? 'Unknown Device', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
-                    subtitle: Text(action, style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)),
-                    trailing: item['timestamp'] != null 
-                      ? Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              _formatTime12h(DateTime.parse(item['timestamp']).toLocal()),
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                                color: isDark ? Colors.white70 : Colors.black87,
-                              ),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              _formatDate(DateTime.parse(item['timestamp']).toLocal()),
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                color: isDark ? Colors.white38 : Colors.black45,
-                              ),
-                            ),
-                          ],
-                        )
-                      : SizedBox.shrink(),
-                  ),
-                );
-              },
+                    );
+                  },
+                ),
+              ),
             )
     );
   }

@@ -16,7 +16,8 @@ class AuthProvider with ChangeNotifier {
     _isAuthenticated = token != null;
     if (_isAuthenticated) {
       _email = await _apiService.storage.read(key: 'email');
-      await fetchUserProfile();
+      // Fetch user profile in background without blocking initial home screen transition
+      fetchUserProfile();
     }
     notifyListeners();
   }
