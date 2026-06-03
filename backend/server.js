@@ -1062,17 +1062,13 @@ app.post('/api/login', [
     res.cookie('refreshToken', cookieValue, {
         httpOnly: true,
         secure: isProduction,
-        sameSite: isProduction ? 'Strict' : 'Lax',
+        sameSite: isProduction ? 'None' : 'Lax',
         maxAge: sessionDurationMs,
         path: '/'
     });
 
-    // 8. Return access token and role. For mobile clients, also return the refresh token in the body.
-    if (isMobile) {
-        return res.json({ token: accessToken, refreshToken: cookieValue, role: user.role });
-    } else {
-        return res.json({ token: accessToken, role: user.role });
-    }
+    // 8. Return access token and role. Always return the refresh token in the body as fallback.
+    return res.json({ token: accessToken, refreshToken: cookieValue, role: user.role });
 });
 
 // Refresh Token (Cookie-Based with Rotation)
@@ -1156,17 +1152,13 @@ app.post('/api/refresh-token', async (req, res) => {
         res.cookie('refreshToken', newCookieValue, {
             httpOnly: true,
             secure: isProduction,
-            sameSite: isProduction ? 'Strict' : 'Lax',
+            sameSite: isProduction ? 'None' : 'Lax',
             maxAge: 24 * 60 * 60 * 1000,
             path: '/'
         });
 
-        // If the request had a body/header refresh token, we also return the new one in JSON
-        if (req.body.refreshToken || req.headers['x-refresh-token']) {
-            return res.json({ token: newAccessToken, refreshToken: newCookieValue });
-        } else {
-            return res.json({ token: newAccessToken });
-        }
+        // Always return the new tokens in JSON body
+        return res.json({ token: newAccessToken, refreshToken: newCookieValue });
     } catch (err) {
         console.error('Refresh Token Error:', err.message);
         res.status(500).json({ error: 'Server error during token refresh' });

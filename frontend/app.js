@@ -155,6 +155,11 @@ function initLogin() {
                 // Store access token in memory (NOT localStorage)
                 setAccessToken(data.token);
                 localStorage.setItem('userEmail', body.email);
+                
+                // Fallback for strict cross-origin cookie blockers (e.g., Safari ITP)
+                if (data.refreshToken) {
+                    localStorage.setItem('fallbackRefreshToken', data.refreshToken);
+                }
 
                 // --- Smart Redirection ---
                 if (data.role === 'admin') {

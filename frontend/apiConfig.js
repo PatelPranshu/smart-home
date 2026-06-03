@@ -27,7 +27,10 @@ function getAccessToken() { return _currentAccessToken; }
 function setAccessToken(token) { _currentAccessToken = token; }
 
 /** Clear the in-memory access token (called on logout). */
-function clearAccessToken() { _currentAccessToken = null; }
+function clearAccessToken() {
+    _currentAccessToken = null;
+    localStorage.removeItem('fallbackRefreshToken');
+}
 
 // ==========================================
 // SESSION RESTORATION (Silent Refresh on Page Load)
@@ -60,11 +63,15 @@ async function tryRefreshToken() {
     if (_refreshPromise) return _refreshPromise;
 
     _refreshPromise = (async () => {
+        const fallback = localStorage.getItem('fallbackRefreshToken');
+        const body = fallback ? JSON.stringify({ refreshToken: fallback }) : undefined;
+
         // Use the lowest-level fetch to bypass our interceptors
         const res = await _nativeFetch(`${window.API_URL}/refresh-token`, {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: body
         });
 
         if (!res.ok) {
@@ -74,6 +81,9 @@ async function tryRefreshToken() {
 
         const data = await res.json();
         setAccessToken(data.token);
+        if (data.refreshToken) {
+            localStorage.setItem('fallbackRefreshToken', data.refreshToken);
+        }
         return data.token;
     })();
 
