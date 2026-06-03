@@ -11,6 +11,7 @@ import 'settings_screen.dart';
 import 'energy_screen.dart';
 import '../utils/ui_utils.dart';
 import '../services/api_service.dart';
+import '../widgets/skeleton_loader.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -224,7 +225,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (context, provider, child) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         if (provider.isLoading && provider.devices.isEmpty) {
-          return Center(child: CircularProgressIndicator(color: Colors.white));
+          return SkeletonDeviceGrid(viewMode: _viewMode);
         }
         
         List<Widget> allSwitches = [];
@@ -238,19 +239,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         
         if (allSwitches.isEmpty) {
           if (!_showNoDevicesFound) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Colors.white),
-                  SizedBox(height: 16),
-                  Text(
-                    "Connecting and syncing devices...",
-                    style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-            );
+            return SkeletonDeviceGrid(viewMode: _viewMode);
           }
           return Center(
             child: SingleChildScrollView(

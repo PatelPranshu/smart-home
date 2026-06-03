@@ -10,6 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <script src="theme.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="apiConfig.js"></script>
 </head>
 
 <body>
@@ -51,6 +53,15 @@
                             <button onclick="saveHomeTitle()" class="btn-primary" style="width: auto; padding: 0 20px;">Save</button>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div class="settings-group" style="margin-top: 25px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 class="group-title">Active Sessions (<span id="session-count">0</span>)</h3>
+                </div>
+                <div class="settings-card-list" id="settings-session-list">
+                    <div class="list-item-placeholder">Loading sessions...</div>
                 </div>
             </div>
 
@@ -278,6 +289,20 @@
                 style="background-color: #f59e0b; margin-bottom: 10px;">Log Out Only This Device</button>
             <button onclick="logoutAllDevices()" class="btn-primary" style="background-color: #ef4444;">Log Out From All
                 Devices</button>
+        </div>
+    </div>
+
+    <div id="modal-session-pass" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="session-pass-title">Verify Identity</h3>
+                <button onclick="closeModals()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p id="session-pass-desc" style="margin-bottom:15px; color:#666; font-size:0.9rem;">
+                Enter your login password to proceed.
+            </p>
+            <input type="password" id="input-session-pass" placeholder="Your Password" class="input-field">
+            <button id="btn-session-pass-submit" onclick="submitSessionPass()" class="btn-primary" style="margin-top:10px;">Verify</button>
         </div>
     </div>
     <script src="apiConfig.js"></script>

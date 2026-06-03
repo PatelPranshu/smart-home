@@ -9,15 +9,20 @@ const cors = require('cors');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
+const cookieParser = require('cookie-parser');
 const User = require('./models/User');
 const Device = require('./models/Device');
 const History = require('./models/History');
 const Firmware = require('./models/Firmware');
+const Session = require('./models/Session');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const { body, validationResult } = require('express-validator');
 const morgan = require('morgan');
+const UAParser = require('ua-parser-js');
+const geoip = require('geoip-lite');
 
 // ==========================================
 // GLOBAL CRASH HANDLERS (Prevent silent deaths)
@@ -56,7 +61,8 @@ class NativeCache {
             this.cache.delete(key);
             return null;
         }
-        return item.data;
+        // Deep clone on read to prevent external mutations from corrupting cached data
+        return typeof structuredClone === 'function' ? structuredClone(item.data) : JSON.parse(JSON.stringify(item.data));
     }
     delete(key) { this.cache.delete(key); }
     clear() { this.cache.clear(); }
@@ -89,13 +95,26 @@ const allowedOrigins = [
 
 const corsOptions = {
     origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl) or if origin is in the allowlist
-        if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            console.warn(`[SECURITY] Blocked request from unauthorized origin: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin || origin === 'null') {
+            return callback(null, true);
         }
+
+        // Check if origin is in the allowed whitelist
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+
+        // Dynamically allow loopback and private local network origins in development mode
+        if (process.env.NODE_ENV !== 'production') {
+            const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
+            if (isLocalOrigin) {
+                return callback(null, true);
+            }
+        }
+
+        console.warn(`[SECURITY] Blocked request from unauthorized origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-access-token', 'x-admin-secret', 'Authorization'],
@@ -184,6 +203,27 @@ io.use((socket, next) => {
         if (!token) return next(new Error('Authentication error'));
         const verified = jwt.verify(token, process.env.JWT_SECRET);
         socket.user = verified;
+        
+        let sessionId = null;
+        const refreshToken = socket.handshake.auth?.refreshToken;
+        if (refreshToken) {
+            const sep = refreshToken.indexOf(':');
+            if (sep !== -1) sessionId = refreshToken.substring(0, sep);
+        } else if (socket.request.headers.cookie) {
+            const cookies = socket.request.headers.cookie.split(';').map(c => c.trim());
+            for (const c of cookies) {
+                if (c.startsWith('refreshToken=')) {
+                    let tokenPayload = c.substring('refreshToken='.length);
+                    tokenPayload = decodeURIComponent(tokenPayload);
+                    const sep = tokenPayload.indexOf(':');
+                    if (sep !== -1) {
+                        sessionId = tokenPayload.substring(0, sep);
+                    }
+                }
+            }
+        }
+        socket.sessionId = sessionId;
+        
         next();
     } catch (err) {
         next(new Error('Authentication error'));
@@ -194,7 +234,10 @@ io.on('connection', (socket) => {
     // Join a room named after the user's ID
     const userId = socket.user.id.toString();
     socket.join(userId);
-    console.log(`[Socket.io] Connected: User ${userId} (socket: ${socket.id})`);
+    if (socket.sessionId) {
+        socket.join(`session_${socket.sessionId}`);
+    }
+    console.log(`[Socket.io] Connected: User ${userId} (socket: ${socket.id}, session: ${socket.sessionId || 'N/A'})`);
 
     // Allow frontend to request a fresh device snapshot on reconnect
     socket.on('request_devices', async () => {
@@ -210,37 +253,58 @@ io.on('connection', (socket) => {
     });
 });
 
-// Helper Function: Emit Real-Time Updates
+// Map to track pending socket.io emits per user to prevent DB thrashing and race conditions
+const emitUpdateQueue = new Map();
+
+// Helper Function: Emit Real-Time Updates (Debounced)
 async function emitDeviceUpdates(userIdStr, isBroadcast = false) {
-    try {
-        const devices = await Device.find({ owner: userIdStr }).lean();
-
-        // --- OPTIMIZATION: Merge High-Frequency Memory Cache ---
-        // Because MongoDB writes for sensors are throttled (once per 60s), 
-        // the DB might have stale temperature/humidity. We must overwrite it
-        // with the absolute latest values from our memory cache before emitting.
-        devices.forEach(d => {
-            const cachedDevice = deviceCache.get(d.deviceId);
-            if (cachedDevice) {
-                d.temperature = cachedDevice.temperature !== undefined ? cachedDevice.temperature : d.temperature;
-                d.humidity = cachedDevice.humidity !== undefined ? cachedDevice.humidity : d.humidity;
-            }
-        });
-
-        // Inject fresh data into cache for frontend HTTP polling (valid for 2s)
-        const cacheKey = `user_devices_${userIdStr}`;
-        deviceCache.set(cacheKey, devices);
-        setTimeout(() => deviceCache.delete(cacheKey), 2000);
-
-        io.to(userIdStr.toString()).emit('devices_updated', devices);
-
-        // --- NEW: Broadcast to other servers in the cluster via MQTT ---
-        if (!isBroadcast && mqttClient && mqttClient.connected) {
-            mqttClient.publish('backend/broadcast/devices_updated', JSON.stringify({ userId: userIdStr.toString() }));
-        }
-    } catch (err) {
-        console.error('[Socket.io] Emitting devices failed:', err.message);
+    if (!emitUpdateQueue.has(userIdStr)) {
+        emitUpdateQueue.set(userIdStr, { timeout: null, shouldBroadcastMQTT: false });
     }
+
+    const queueItem = emitUpdateQueue.get(userIdStr);
+    if (queueItem.timeout) clearTimeout(queueItem.timeout);
+
+    // If any call in this burst needs to broadcast to MQTT, remember it
+    if (!isBroadcast) {
+        queueItem.shouldBroadcastMQTT = true;
+    }
+
+    // Debounce for 300ms to allow burst MQTT messages (like a multi-switch refresh) 
+    // to finish their DB writes before we fetch the final state.
+    queueItem.timeout = setTimeout(async () => {
+        const needsBroadcast = queueItem.shouldBroadcastMQTT;
+        emitUpdateQueue.delete(userIdStr);
+        try {
+            const devices = await Device.find({ owner: userIdStr }).lean();
+
+            // --- OPTIMIZATION: Merge High-Frequency Memory Cache ---
+            // Because MongoDB writes for sensors are throttled (once per 60s), 
+            // the DB might have stale temperature/humidity. We must overwrite it
+            // with the absolute latest values from our memory cache before emitting.
+            devices.forEach(d => {
+                const cachedDevice = deviceCache.get(d.deviceId);
+                if (cachedDevice) {
+                    d.temperature = cachedDevice.temperature !== undefined ? cachedDevice.temperature : d.temperature;
+                    d.humidity = cachedDevice.humidity !== undefined ? cachedDevice.humidity : d.humidity;
+                }
+            });
+
+            // Inject fresh data into cache for frontend HTTP polling (valid for 2s)
+            const cacheKey = `user_devices_${userIdStr}`;
+            deviceCache.set(cacheKey, devices);
+            setTimeout(() => deviceCache.delete(cacheKey), 2000);
+
+            io.to(userIdStr.toString()).emit('devices_updated', devices);
+
+            // --- NEW: Broadcast to other servers in the cluster via MQTT ---
+            if (needsBroadcast && mqttClient && mqttClient.connected) {
+                mqttClient.publish('backend/broadcast/devices_updated', JSON.stringify({ userId: userIdStr.toString() }));
+            }
+        } catch (err) {
+            console.error('[Socket.io] Emitting devices failed:', err.message);
+        }
+    }, 300);
 }
 
 // LOGGING
@@ -304,6 +368,7 @@ app.use('/api/verify-code', authLimiter);     // guessing kit codes
 app.use('/api/claim-device', authLimiter);    // guessing device IDs
 
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
 
 // Patch for Express 5.0 Read-Only Query
 app.use((req, res, next) => {
@@ -496,7 +561,33 @@ mqttClient.on('connect', () => {
     mqttClient.subscribe('backend/broadcast/devices_updated');
 });
 
+// MQTT Resilience Handlers — prevent silent failures and server crashes
+mqttClient.on('error', (err) => {
+    console.error('[MQTT ERROR]', err.message);
+});
+
+mqttClient.on('offline', () => {
+    console.warn('[MQTT] Broker connection lost. Will auto-reconnect...');
+});
+
+mqttClient.on('reconnect', () => {
+    console.log('[MQTT] Attempting to reconnect to broker...');
+});
+
 const sensorLastWritten = new Map();
+const deviceLastSeen = new Map();
+
+// Periodic cleanup for tracking Maps to prevent unbounded memory growth
+setInterval(() => {
+    const now = Date.now();
+    const ONE_HOUR = 60 * 60 * 1000;
+    for (const [key, ts] of sensorLastWritten) {
+        if (now - ts > ONE_HOUR) sensorLastWritten.delete(key);
+    }
+    for (const [key, ts] of deviceLastSeen) {
+        if (now - ts > ONE_HOUR) deviceLastSeen.delete(key);
+    }
+}, 10 * 60 * 1000).unref(); // Every 10 minutes, don't keep process alive
 
 function safeParse(buffer, topic) {
     try { return JSON.parse(buffer.toString()); }
@@ -530,6 +621,22 @@ mqttClient.on('message', async (topic, message) => {
 
         const deviceId = parts[1];
         const type = parts[2];
+
+        // Track last seen time for Ping/Pong offline detection
+        deviceLastSeen.set(deviceId, Date.now());
+
+        // Implicit Online Recovery: If we hear from the device, it MUST be online.
+        Device.updateOne(
+            { deviceId: deviceId, isOnline: false }, 
+            { $set: { isOnline: true } }
+        ).then(res => {
+            if (res.modifiedCount > 0) {
+                console.log(`Device ${deviceId} auto-recovered to ONLINE`);
+                Device.findOne({ deviceId }).select('owner').lean().then(d => {
+                    if (d && d.owner) emitDeviceUpdates(d.owner.toString());
+                });
+            }
+        }).catch(() => {});
 
         // -------------------------------------------------
         // 1. User flipped physical switch -> Update DB
@@ -568,8 +675,7 @@ mqttClient.on('message', async (topic, message) => {
                 { $set: updateFields }
             );
 
-            // Invalidate cache for this device
-            deviceCache.delete(deviceId);
+            // Removed destructive deviceCache.delete(deviceId) to preserve temp/hum memory overlay
 
             // EMIT REAL-TIME UPDATE
             if (device && device.owner) {
@@ -632,7 +738,7 @@ mqttClient.on('message', async (topic, message) => {
             );
 
             console.log(`Device ${deviceId} is now ${status} (Forced Sync)`);
-            deviceCache.delete(deviceId); // Invalidate cache
+            // Removed destructive deviceCache.delete(deviceId) to preserve temp/hum memory overlay
 
             // Fetch freshly updated device
             const device = await Device.findOne({ deviceId }).lean();
@@ -840,7 +946,7 @@ app.post('/api/register', [
 
     // Proceed (Your existing code)
     const { email, password } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 14);
+    const hashedPassword = await bcrypt.hash(password, 12);
     try {
         const user = await User.create({ email, password: hashedPassword });
         res.json({ status: 'ok' });
@@ -861,62 +967,340 @@ app.post('/api/login', [
     if (!errors.isEmpty()) {
         return res.status(400).json({ error: errors.array()[0].msg });
     }
-    const { email, password, isMobile } = req.body;
+    const { email, password, isMobile, stayLoggedIn } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ error: 'User not found' });
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ error: 'Invalid password' });
 
-    // For mobile client logins, tokens do not expire on the server side (lifetime access)
-    const tokenOptions = isMobile ? { algorithm: 'HS256' } : { expiresIn: '2h', algorithm: 'HS256' };
-    const refreshOptions = isMobile ? { algorithm: 'HS256' } : { expiresIn: '30d', algorithm: 'HS256' };
+    // ── Unified Architecture — Dual-Token Flow for all clients ──
 
-    const token = jwt.sign(
-        { id: user._id, tokenVersion: user.tokenVersion || 0, isMobile: !!isMobile }, 
-        process.env.JWT_SECRET, 
-        tokenOptions
-    );
-    const refreshToken = jwt.sign(
-        { id: user._id, tokenVersion: user.tokenVersion || 0, isMobile: !!isMobile }, 
-        process.env.JWT_SECRET, 
-        refreshOptions
+    // 1. Generate short-lived Access Token (15 minutes)
+    const accessToken = jwt.sign(
+        { id: user._id, tokenVersion: user.tokenVersion || 0 },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m', algorithm: 'HS256' }
     );
 
-    // Send the role back to the frontend 
-    res.json({ token, refreshToken, role: user.role });
-});
+    // 2. Generate cryptographically random Refresh Token
+    const rawRefreshToken = crypto.randomBytes(40).toString('hex');
 
-// Refresh Token
-app.post('/api/refresh-token', async (req, res) => {
-    const { refreshToken } = req.body;
-    if (!refreshToken) return res.status(401).json({ error: 'Refresh token required' });
+    // 3. Hash the refresh token for secure storage
+    const refreshTokenHash = await bcrypt.hash(rawRefreshToken, 10);
 
-    try {
-        const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-        const user = await User.findById(decoded.id).lean();
+    // 4. Session expiration: 1 day default, 14 days if "Stay Logged In"
+    const sessionDurationMs = stayLoggedIn ? 14 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+    const expiresAt = new Date(Date.now() + sessionDurationMs);
+
+    // Parse User-Agent and IP for Device Info
+    const customDeviceName = req.headers['x-device-name'];
+    let parsedDeviceName = 'Unknown Device';
+    const userAgentString = req.headers['user-agent'] || '';
+    
+    if (customDeviceName) {
+        parsedDeviceName = customDeviceName;
+    } else {
+        const parser = new UAParser(userAgentString);
+        const result = parser.getResult();
+        const os = result.os.name || 'Unknown OS';
+        const browser = result.browser.name || 'Unknown Browser';
         
-        if (!user || (decoded.tokenVersion !== undefined && user.tokenVersion !== decoded.tokenVersion)) {
-            return res.status(403).json({ error: 'Invalid refresh token' });
+        if (result.device.vendor && result.device.model) {
+            parsedDeviceName = `${result.device.vendor} ${result.device.model}`;
+        } else {
+            parsedDeviceName = `${os} ${browser}`;
         }
+    }
 
-        const newTokenOptions = decoded.isMobile ? { algorithm: 'HS256' } : { expiresIn: '2h', algorithm: 'HS256' };
-        const newToken = jwt.sign(
-            { id: user._id, tokenVersion: user.tokenVersion || 0, isMobile: !!decoded.isMobile }, 
-            process.env.JWT_SECRET, 
-            newTokenOptions
-        );
-        res.json({ token: newToken });
-    } catch (err) {
-        res.status(403).json({ error: 'Invalid or expired refresh token' });
+    let ipAddress = req.ip || 'Unknown';
+    if (ipAddress === '::1' || ipAddress === '127.0.0.1') {
+        ipAddress = 'Localhost';
+    } else if (ipAddress.includes('::ffff:')) {
+        ipAddress = ipAddress.split('::ffff:')[1];
+    }
+    
+    let location = 'Unknown Location';
+    if (ipAddress !== 'Localhost' && ipAddress !== 'Unknown') {
+        const geo = geoip.lookup(ipAddress);
+        if (geo) {
+            let countryName = geo.country || 'Unknown Country';
+            try {
+                const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+                countryName = regionNames.of(geo.country) || geo.country;
+            } catch(e) {}
+            location = `${geo.city || 'Unknown Area'}, ${geo.region || 'Unknown State'}, ${countryName}`;
+        } else if (ipAddress.startsWith('192.168.') || ipAddress.startsWith('10.') || ipAddress.startsWith('172.')) {
+            location = 'Local Network';
+        }
+    } else {
+        location = 'Local Machine';
+    }
+
+    // Check if user has any existing sessions to determine primary
+    const existingSessionsCount = await Session.countDocuments({ userId: user._id });
+    const isPrimary = existingSessionsCount === 0;
+
+    // 5. Create server-side session
+    const session = await Session.create({
+        userId: user._id,
+        refreshTokenHash,
+        deviceInfo: userAgentString,
+        deviceName: parsedDeviceName,
+        location,
+        isPrimary,
+        ipAddress,
+        expiresAt,
+        lastActive: new Date()
+    });
+
+    // 6. Cookie value = sessionId:rawToken (sessionId for O(1) lookup)
+    const cookieValue = `${session._id}:${rawRefreshToken}`;
+
+    // 7. Set HttpOnly cookie (primarily for web clients)
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('refreshToken', cookieValue, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'Strict' : 'Lax',
+        maxAge: sessionDurationMs,
+        path: '/'
+    });
+
+    // 8. Return access token and role. For mobile clients, also return the refresh token in the body.
+    if (isMobile) {
+        return res.json({ token: accessToken, refreshToken: cookieValue, role: user.role });
+    } else {
+        return res.json({ token: accessToken, role: user.role });
     }
 });
 
-// Logout All Devices
+// Refresh Token (Cookie-Based with Rotation)
+app.post('/api/refresh-token', async (req, res) => {
+    // Support both HttpOnly cookies (web) and JSON body (mobile)
+    const tokenPayload = req.cookies?.refreshToken || req.body.refreshToken;
+    if (!tokenPayload) return res.status(401).json({ error: 'No refresh token' });
+
+    // Parse token payload: "sessionId:rawToken"
+    const separatorIndex = tokenPayload.indexOf(':');
+    if (separatorIndex === -1) return res.status(401).json({ error: 'Malformed refresh token' });
+
+    const sessionId = tokenPayload.substring(0, separatorIndex);
+    const rawToken = tokenPayload.substring(separatorIndex + 1);
+
+    if (!sessionId || !rawToken) return res.status(401).json({ error: 'Invalid refresh token' });
+
+    try {
+        // 1. Look up the session by ID (O(1) lookup)
+        const session = await Session.findById(sessionId);
+        if (!session) {
+            // Session not found — possibly already logged out or expired (TTL cleanup)
+            res.clearCookie('refreshToken', { path: '/' });
+            return res.status(401).json({ error: 'Session not found' });
+        }
+
+        // 2. Check if session is expired (double-check beyond TTL)
+        if (session.expiresAt < new Date()) {
+            await Session.deleteOne({ _id: session._id });
+            res.clearCookie('refreshToken', { path: '/' });
+            return res.status(401).json({ error: 'Session expired' });
+        }
+
+        // 3. Verify the raw token against the stored hash
+        const isValid = await bcrypt.compare(rawToken, session.refreshTokenHash);
+        if (!isValid) {
+            // Potential token theft — invalidate the entire session for safety
+            await Session.deleteOne({ _id: session._id });
+            res.clearCookie('refreshToken', { path: '/' });
+            console.warn(`[SECURITY] Refresh token mismatch for session ${sessionId}. Session destroyed.`);
+            return res.status(401).json({ error: 'Invalid refresh token' });
+        }
+
+        // 4. Verify user still exists and check tokenVersion
+        const user = await User.findById(session.userId).lean();
+        if (!user) {
+            await Session.deleteOne({ _id: session._id });
+            res.clearCookie('refreshToken', { path: '/' });
+            return res.status(401).json({ error: 'User not found' });
+        }
+
+        // 5. Generate new Access Token (15 minutes)
+        const newAccessToken = jwt.sign(
+            { id: user._id, tokenVersion: user.tokenVersion || 0 },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m', algorithm: 'HS256' }
+        );
+
+        // 6. Refresh Token Rotation — generate new refresh token and update session
+        const newRawRefreshToken = crypto.randomBytes(40).toString('hex');
+        const newRefreshTokenHash = await bcrypt.hash(newRawRefreshToken, 10);
+
+        session.refreshTokenHash = newRefreshTokenHash;
+        const newCookieValue = `${session._id}:${newRawRefreshToken}`;
+
+        // Extend session expiration
+        const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)); // Extend by 1 day on active use
+        await Session.updateOne(
+            { _id: session._id },
+            {
+                $set: {
+                    refreshTokenHash: newRefreshTokenHash,
+                    lastActive: new Date(),
+                    expiresAt
+                }
+            }
+        );
+
+        // Set new HttpOnly cookie
+        const isProduction = process.env.NODE_ENV === 'production';
+        res.cookie('refreshToken', newCookieValue, {
+            httpOnly: true,
+            secure: isProduction,
+            sameSite: isProduction ? 'Strict' : 'Lax',
+            maxAge: 24 * 60 * 60 * 1000,
+            path: '/'
+        });
+
+        // If the request had a body/header refresh token, we also return the new one in JSON
+        if (req.body.refreshToken || req.headers['x-refresh-token']) {
+            return res.json({ token: newAccessToken, refreshToken: newCookieValue });
+        } else {
+            return res.json({ token: newAccessToken });
+        }
+    } catch (err) {
+        console.error('Refresh Token Error:', err.message);
+        res.status(500).json({ error: 'Server error during token refresh' });
+    }
+});
+
+// Logout Route (Delete specific session)
+app.post('/api/logout', async (req, res) => {
+    const tokenPayload = req.cookies?.refreshToken || req.body.refreshToken || req.headers['x-refresh-token'];
+
+    if (tokenPayload) {
+        const separatorIndex = tokenPayload.indexOf(':');
+        if (separatorIndex !== -1) {
+            const sessionId = tokenPayload.substring(0, separatorIndex);
+            try {
+                await Session.deleteOne({ _id: sessionId });
+            } catch (err) {
+                console.error('Logout session delete error:', err.message);
+            }
+        }
+    }
+
+    res.clearCookie('refreshToken', { path: '/' });
+    res.json({ status: 'ok', message: 'Logged out successfully' });
+});
+
+// Active Sessions API
+app.get('/api/sessions', auth, async (req, res) => {
+    try {
+        const sessions = await Session.find({ userId: req.user.id })
+            .select('_id deviceName location lastActive isPrimary ipAddress')
+            .sort({ lastActive: -1 })
+            .lean();
+        
+        let currentSessionId = null;
+        const tokenPayload = req.cookies?.refreshToken || req.headers['x-refresh-token'];
+        if (tokenPayload) {
+            const separatorIndex = tokenPayload.indexOf(':');
+            if (separatorIndex !== -1) {
+                currentSessionId = tokenPayload.substring(0, separatorIndex);
+            }
+        }
+
+        const formattedSessions = sessions.map(s => ({
+            id: s._id,
+            deviceName: s.deviceName,
+            location: s.location,
+            lastActive: s.lastActive,
+            isPrimary: s.isPrimary,
+            ipAddress: s.ipAddress,
+            isCurrentDevice: currentSessionId === s._id.toString()
+        }));
+
+        res.json(formattedSessions);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch sessions' });
+    }
+});
+
+app.post('/api/sessions/:id/set-primary', auth, async (req, res) => {
+    try {
+        const { password } = req.body;
+        if (!password) return res.status(400).json({ error: 'Password required to set primary device' });
+
+        const user = await User.findById(req.user.id);
+        const valid = await bcrypt.compare(password, user.password);
+        if (!valid) return res.status(400).json({ error: 'Invalid password' });
+
+        const session = await Session.findOne({ _id: req.params.id, userId: req.user.id });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+
+        await Session.updateMany({ userId: req.user.id }, { $set: { isPrimary: false } });
+        session.isPrimary = true;
+        await session.save();
+
+        res.json({ status: 'ok', message: 'Primary device updated' });
+    } catch (err) {
+        res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+app.post('/api/sessions/:id/logout', auth, async (req, res) => {
+    try {
+        const session = await Session.findOne({ _id: req.params.id, userId: req.user.id });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+
+        if (session.isPrimary) {
+            const { password } = req.body;
+            if (!password) return res.status(400).json({ error: 'Password required to remove primary device' });
+            
+            const user = await User.findById(req.user.id);
+            const valid = await bcrypt.compare(password, user.password);
+            if (!valid) return res.status(400).json({ error: 'Invalid password' });
+        }
+
+        await Session.deleteOne({ _id: req.params.id });
+        io.to(`session_${req.params.id}`).emit('force_logout');
+        
+        // If they are logging out their own session, clear cookie
+        const tokenPayload = req.cookies?.refreshToken || req.body.fallbackRefreshToken;
+        if (tokenPayload && tokenPayload.startsWith(req.params.id + ':')) {
+            res.clearCookie('refreshToken', { path: '/' });
+        }
+
+        res.json({ status: 'ok', message: 'Device logged out successfully' });
+    } catch (err) {
+        res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+// Logout All Devices (destroys ALL user sessions + increments tokenVersion)
 app.post('/api/logout-all', auth, async (req, res) => {
     try {
-        // Increment token version to invalidate all current tokens
+        // Check if there is a primary session that requires a password
+        const primarySession = await Session.findOne({ userId: req.user.id, isPrimary: true });
+        if (primarySession) {
+            const { password } = req.body;
+            if (!password) return res.status(400).json({ error: 'Password required because a primary device is set' });
+            
+            const user = await User.findById(req.user.id);
+            const valid = await bcrypt.compare(password, user.password);
+            if (!valid) return res.status(400).json({ error: 'Invalid password' });
+        }
+
+        // 1. Delete ALL sessions for this user from the Session collection
+        await Session.deleteMany({ userId: req.user.id });
+        io.to(req.user.id.toString()).emit('force_logout');
+
+        // 2. Increment token version to invalidate all current access tokens (failsafe)
         await User.findByIdAndUpdate(req.user.id, { $inc: { tokenVersion: 1 } });
+
+        // 3. Clear the current device's cookie
+        res.clearCookie('refreshToken', { path: '/' });
+
         res.json({ status: 'ok', message: 'Logged out from all devices' });
     } catch (err) {
         console.error('Logout All Error:', err);
@@ -1016,7 +1400,23 @@ app.post('/api/devices/refresh', auth, async (req, res) => {
         if (!devices || devices.length === 0) return res.json({ status: 'no_devices' });
 
         devices.forEach(device => {
+            const pingTime = Date.now();
             mqttClient.publish(`devices/${device.deviceId}/check`, '1');
+
+            // Set up an offline detector timeout (4 seconds)
+            setTimeout(async () => {
+                const lastSeen = deviceLastSeen.get(device.deviceId) || 0;
+                
+                // If the device hasn't sent ANY message since we sent the ping
+                // it means it never replied to our check request.
+                if (lastSeen < pingTime) {
+                    await Device.updateOne({ deviceId: device.deviceId }, { $set: { isOnline: false } });
+                    console.log(`Device ${device.deviceId} marked OFFLINE due to refresh ping timeout.`);
+                    if (device.owner) {
+                        emitDeviceUpdates(device.owner.toString());
+                    }
+                }
+            }, 4000);
         });
 
         res.json({ status: 'refresh_requested' });
@@ -1263,7 +1663,14 @@ app.post('/api/edit', auth, [
 
 // Timer (Auto Turn Off)
 
-app.post('/api/timer', auth, async (req, res) => {
+app.post('/api/timer', auth, [
+    body('deviceId').isString().trim().escape(),
+    body('switchId').isInt(),
+    body('minutes').isFloat({ min: 0.5, max: 1440 }).withMessage('Timer must be between 0.5 and 1440 minutes')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+
     const { deviceId, switchId, minutes } = req.body;
     const timerKey = `${deviceId}-${switchId}`;
 

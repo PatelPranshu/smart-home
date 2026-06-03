@@ -6,21 +6,8 @@
 // API_URL is now managed by apiConfig.js
 
 // Global State
-const token = localStorage.getItem('token');
-const path = window.location.pathname;
-
-// GLOBAL FETCH INTERCEPTOR
-const originalFetch = window.fetch;
-window.fetch = async function () {
-    const response = await originalFetch.apply(this, arguments);
-    if (response.status === 401) {
-        localStorage.removeItem('token');
-        if (!window.location.pathname.endsWith('index.html') && window.location.pathname !== '/') {
-            window.location.href = 'index.html';
-        }
-    }
-    return response;
-};
+// SECURITY: Access token is managed in-memory by apiConfig.js
+// Auth headers and 401 handling are auto-injected by the global fetch interceptor in apiConfig.js
 
 // ==========================================
 // 0. TOAST NOTIFICATION SYSTEM
@@ -76,14 +63,25 @@ const typeIcons = {
 };
 
 // --- ROUTER ---
-document.addEventListener('DOMContentLoaded', () => {
-    // Auth Checks
-    if (!token && !path.endsWith('index.html') && path !== '/') {
-        window.location.href = 'index.html';
+document.addEventListener('DOMContentLoaded', async () => {
+    const path = window.location.pathname;
+
+    // ── Login page: no session required ──
+    if (path.endsWith('index.html') || path === '/') {
+        // Try restoring an existing session — if valid, skip login
+        const hasSession = await initSession();
+        if (hasSession) {
+            window.location.href = 'home.html';
+            return;
+        }
+        initLogin();
         return;
     }
-    if (token && (path.endsWith('index.html') || path === '/')) {
-        window.location.href = 'home.html';
+
+    // ── All other pages: require a valid session ──
+    const hasSession = await initSession();
+    if (!hasSession) {
+        window.location.href = 'index.html';
         return;
     }
 
@@ -91,12 +89,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (path.includes('home.html')) initHome();
     if (path.includes('energy.html')) initEnergy();
     if (path.includes('settings.html')) initSettings();
-    if (path.includes('index.html') || path === '/') initLogin();
 
     // Global OTA update checker — runs on ALL authenticated pages
-    if (token && !path.endsWith('index.html') && path !== '/') {
-        initGlobalOtaChecker();
-    }
+    initGlobalOtaChecker();
 });
 
 
@@ -136,7 +131,8 @@ function initLogin() {
         e.preventDefault();
         const email = document.getElementById('email').value;
         const password = document.getElementById('password').value;
-        await handleAuth('/login', { email, password });
+        const stayLoggedIn = document.getElementById('stay-logged-in')?.checked || false;
+        await handleAuth('/login', { email, password, stayLoggedIn });
     });
 
     regForm.addEventListener('submit', async (e) => {
@@ -156,17 +152,16 @@ function initLogin() {
             const data = await res.json();
 
             if (data.token) {
-                // Save Token
-                localStorage.setItem('token', data.token);
+                // Store access token in memory (NOT localStorage)
+                setAccessToken(data.token);
                 localStorage.setItem('userEmail', body.email);
 
-                // --- FIX START: Smart Redirection ---
+                // --- Smart Redirection ---
                 if (data.role === 'admin') {
                     window.location.href = 'admin.html';
                 } else {
                     window.location.href = 'home.html';
                 }
-                // --- FIX END ---
 
             } else if (data.status === 'ok') {
                 showToast("Account created! Please log in.", "success");
@@ -192,7 +187,7 @@ async function initHome() {
 
     // --- Fetch Custom Title ---
     try {
-        const res = await fetch(`${API_URL}/user/profile`, { headers: { 'x-access-token': token } });
+        const res = await fetch(`${API_URL}/user/profile`, { headers: {} });
         const data = await res.json();
         if (data.homeTitle) {
             document.getElementById('dashboard-title').innerText = data.homeTitle;
@@ -203,34 +198,54 @@ async function initHome() {
     fetchDevices();
 
     // --- NEW: Refresh Devices Button Handler ---
+    const stopRefreshSpinner = () => {
+        const btn = document.getElementById('refresh-btn');
+        if (btn) {
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.classList.remove('spinning');
+            }
+        }
+    };
+
     window.refreshDevices = async () => {
         const btn = document.getElementById('refresh-btn');
         if (btn) {
-            btn.style.transform = 'rotate(180deg)';
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.classList.add('spinning');
+            }
         }
         try {
+            window.lastRefreshTime = Date.now();
             const res = await fetch(`${API_URL}/devices/refresh`, {
                 method: 'POST',
-                headers: { 'x-access-token': token }
+                headers: {}
             });
             if (res.ok) {
                 showToast('Status check requested from devices', 'info');
+                // Set a safety timeout to stop the spinner after 5 seconds in case no socket event comes
+                setTimeout(() => {
+                    stopRefreshSpinner();
+                }, 5000);
             } else {
+                window.lastRefreshTime = 0;
+                stopRefreshSpinner();
                 showToast('Failed to request device refresh', 'error');
             }
         } catch (err) {
             console.error('Refresh failed', err);
+            window.lastRefreshTime = 0;
+            stopRefreshSpinner();
             showToast('Server Error', 'error');
         }
-        setTimeout(() => {
-            if (btn) {
-                btn.style.transform = 'rotate(0deg)';
-            }
-        }, 500);
     };
 
     // SOCKET.IO REAL-TIME CONNECTION
     // Make socket global so it persists and can be reconnected on server change
+    // Track if we're currently retrying socket auth to prevent loops
+    let _socketAuthRetrying = false;
+
     function connectSocket() {
         // Clean up existing connection if any
         if (window.smartSocket) {
@@ -244,7 +259,7 @@ async function initHome() {
             console.log('[Socket.io] Connecting to:', socketURL);
 
             const socket = io(socketURL, {
-                auth: { token: token },
+                auth: { token: getAccessToken() },
                 reconnection: true,
                 reconnectionAttempts: Infinity,
                 reconnectionDelay: 1000,
@@ -258,16 +273,33 @@ async function initHome() {
 
             socket.on('connect', () => {
                 console.log('[Socket.io] ✅ Connected to server (id:', socket.id, ')');
+                _socketAuthRetrying = false;
                 // Request the absolute latest device state from the server
                 socket.emit('request_devices');
             });
 
-            socket.on('connect_error', (err) => {
+            socket.on('force_logout', () => {
+                console.warn('[Socket.io] Force logout received. Terminating session.');
+                clearAccessToken();
+                alert('Your session has been terminated by another device or action.');
+                window.location.href = 'index.html';
+            });
+
+            socket.on('connect_error', async (err) => {
                 console.error('[Socket.io] Connection error:', err.message);
-                if (err.message === 'Authentication error') {
-                    console.error('[Socket.io] Auth Error. Logging out.');
-                    localStorage.removeItem('token');
-                    window.location.href = 'index.html';
+                if (err.message === 'Authentication error' && !_socketAuthRetrying) {
+                    // Token may have expired — try a silent refresh before giving up
+                    _socketAuthRetrying = true;
+                    try {
+                        await tryRefreshToken();
+                        // Update socket auth with fresh token and reconnect
+                        socket.auth.token = getAccessToken();
+                        socket.connect();
+                    } catch {
+                        console.error('[Socket.io] Auth refresh failed. Redirecting to login.');
+                        clearAccessToken();
+                        window.location.href = 'index.html';
+                    }
                 }
             });
 
@@ -277,12 +309,25 @@ async function initHome() {
 
             socket.on('reconnect', (attemptNumber) => {
                 console.log('[Socket.io] ✅ Reconnected after', attemptNumber, 'attempts');
+                // Refresh socket auth token on reconnect
+                socket.auth.token = getAccessToken();
                 // Re-request devices to catch up on missed updates
                 socket.emit('request_devices');
             });
 
             socket.on('devices_updated', (devices) => {
                 console.log('[Socket.io] Received devices_updated:', devices.length, 'devices');
+
+                if (window.lastRefreshTime && (Date.now() - window.lastRefreshTime < 5000)) {
+                    window.lastRefreshTime = 0; // Prevent duplicate toasts
+                    stopRefreshSpinner();
+                    // Delay the success toast slightly to guarantee it visually pops up 
+                    // AFTER the "Status check requested" HTTP toast, even if the WebSocket is faster.
+                    setTimeout(() => {
+                        showToast('Device status updated', 'success');
+                    }, 600);
+                }
+
                 // Optimistic UI Background Sync
                 localStorage.setItem('cachedDevices', JSON.stringify(devices));
                 window.allDevices = devices;
@@ -462,7 +507,7 @@ async function initHome() {
         try {
             await fetch(`${API_URL}/edit`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     deviceId: window.currentDeviceId,
                     switchId: window.currentSwitchId,
@@ -489,7 +534,7 @@ async function initHome() {
         try {
             await fetch(`${API_URL}/timer`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     deviceId: window.currentDeviceId,
                     switchId: window.currentSwitchId,
@@ -507,7 +552,7 @@ async function initHome() {
         try {
             const res = await fetch(`${API_URL}/timer/cancel`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     deviceId: window.currentDeviceId,
                     switchId: window.currentSwitchId
@@ -538,10 +583,23 @@ async function initHome() {
 async function initEnergy() {
     const list = document.getElementById('history-list');
 
+    if (typeof io !== 'undefined') {
+        const socketURL = API_URL.replace(/\/api\/?$/, "");
+        const socket = io(socketURL, {
+            auth: { token: getAccessToken() },
+            reconnection: true
+        });
+        socket.on('force_logout', () => {
+            console.warn('[Socket.io] Force logout received on energy page.');
+            clearAccessToken();
+            window.location.href = 'index.html';
+        });
+    }
+
     async function loadHistory() {
         try {
             const res = await fetch(`${API_URL}/history?t=${Date.now()}`, {
-                headers: { 'x-access-token': token },
+                headers: {},
                 cache: 'no-store'
             });
 
@@ -641,9 +699,25 @@ async function initSettings() {
     const userEmail = localStorage.getItem('userEmail') || "User";
     document.getElementById('username-display').innerText = userEmail;
 
+    if (typeof io !== 'undefined') {
+        const socketURL = API_URL.replace(/\/api\/?$/, "");
+        const socket = io(socketURL, {
+            auth: { token: getAccessToken() },
+            reconnection: true
+        });
+        socket.on('force_logout', () => {
+            console.warn('[Socket.io] Force logout received on settings page.');
+            clearAccessToken();
+            window.location.href = 'index.html';
+        });
+    }
+    
+    // Load sessions
+    loadSessions();
+
     // --- NEW: Load current title into input box ---
     try {
-        const res = await fetch(`${API_URL}/user/profile`, { headers: { 'x-access-token': token } });
+        const res = await fetch(`${API_URL}/user/profile`, { headers: {} });
         const data = await res.json();
         if (document.getElementById('input-home-title')) {
             document.getElementById('input-home-title').value = data.homeTitle || "";
@@ -658,7 +732,7 @@ async function initSettings() {
         try {
             const res = await fetch(`${API_URL}/user-update`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ homeTitle: newTitle })
             });
 
@@ -674,7 +748,7 @@ async function initSettings() {
     const sectionEl = document.getElementById('google-integration-section');
     try {
         const res = await fetch(`${API_URL}/user/google-status`, {
-            headers: { 'x-access-token': token }
+            headers: {}
         });
         const data = await res.json();
         // Only show if linked
@@ -692,7 +766,7 @@ async function initSettings() {
         try {
             await fetch(`${API_URL}/user/google-status`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled: isEnabled })
             });
 
@@ -906,7 +980,7 @@ async function initSettings() {
         if (!container) return;
 
         try {
-            const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
+            const res = await fetch(`${API_URL}/devices`, { headers: {} });
             const devices = await res.json();
 
             container.innerHTML = '';
@@ -976,7 +1050,7 @@ async function initSettings() {
             // Step A: Verify Password
             const resVerify = await fetch(`${API_URL}/verify-password`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password })
             });
 
@@ -988,7 +1062,7 @@ async function initSettings() {
             // Step B: Remove Device
             const resRemove = await fetch(`${API_URL}/remove-device`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ deviceId: window.deviceToRemove })
             });
 
@@ -1015,7 +1089,7 @@ async function initSettings() {
         try {
             const res = await fetch(`${API_URL}/claim-device`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ deviceId, secretCode })
             });
 
@@ -1047,7 +1121,7 @@ async function initSettings() {
         try {
             const res = await fetch(`${API_URL}/verify-code`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code })
             });
 
@@ -1067,7 +1141,7 @@ async function initSettings() {
         try {
             const res = await fetch(`${API_URL}/user-update`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: newPass })
             });
             if (res.ok) {
@@ -1093,7 +1167,7 @@ async function initSettings() {
         try {
             const res = await fetch(`${API_URL}/verify-password`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password })
             });
 
@@ -1111,7 +1185,7 @@ async function initSettings() {
         const select = document.getElementById('device-select');
         select.innerHTML = '<option>Loading...</option>';
         try {
-            const res = await fetch(`${API_URL}/devices`, { headers: { 'x-access-token': token } });
+            const res = await fetch(`${API_URL}/devices`, { headers: {} });
             const devices = await res.json();
             select.innerHTML = '';
             devices.forEach(d => {
@@ -1136,7 +1210,7 @@ async function initSettings() {
         try {
             await fetch(`${API_URL}/wifi-config`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ deviceId, ssid, pass })
             });
 
@@ -1158,7 +1232,7 @@ async function initSettings() {
     // Load current preference
     try {
         const res = await fetch(`${API_URL}/user/update-preference`, {
-            headers: { 'x-access-token': token }
+            headers: {}
         });
         const data = await res.json();
         if (updateToggle) {
@@ -1179,7 +1253,7 @@ async function initSettings() {
         try {
             await fetch(`${API_URL}/user/update-preference`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ preference })
             });
 
@@ -1238,7 +1312,7 @@ async function fetchDevices() {
 
     // --- SILENT BACKGROUND FETCH ---
     fetch(`${API_URL}/devices?t=${Date.now()}`, {
-        headers: { 'x-access-token': token },
+        headers: {},
         cache: 'no-store'
     })
     .then(res => res.json())
@@ -1408,7 +1482,7 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
     try {
         const response = await fetch(`${API_URL}/control`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceId, switchId, state: newState }),
             signal: controller.signal
         });
@@ -1452,7 +1526,7 @@ async function setFanSpeed(deviceId, switchId, speed, cardElement) {
     try {
         const res = await fetch(`${API_URL}/fan-speed`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceId, switchId, speed })
         });
         if (!res.ok) throw new Error('Failed');
@@ -1484,8 +1558,16 @@ function closeLogoutModal() {
     if (modal) modal.classList.add('hidden');
 }
 
-function logoutThisDevice() {
-    localStorage.removeItem('token');
+async function logoutThisDevice() {
+    try {
+        await fetch(`${API_URL}/logout`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+    } catch (err) {
+        console.error('Logout request failed:', err);
+    }
+    clearAccessToken();
     window.location.href = 'index.html';
 }
 
@@ -1493,12 +1575,12 @@ async function logoutAllDevices() {
     try {
         await fetch(`${API_URL}/logout-all`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token }
+            headers: { 'Content-Type': 'application/json' }
         });
     } catch (err) {
         console.error("Logout all failed", err);
     } finally {
-        logoutThisDevice();
+        await logoutThisDevice();
     }
 }
 
@@ -1597,11 +1679,170 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 // GLOBAL OTA UPDATE CHECKER (All Pages)
 // ==========================================
+// ==========================================
+// ACTIVE SESSIONS MANAGEMENT
+// ==========================================
+let currentSessionAction = null;
+let currentSessionIdTarget = null;
+let hasPrimarySession = false;
+
+async function loadSessions() {
+    const listEl = document.getElementById('settings-session-list');
+    const countEl = document.getElementById('session-count');
+    if (!listEl) return;
+
+    try {
+        const res = await fetch(`${API_URL}/sessions`);
+        if (!res.ok) throw new Error('Failed to fetch sessions');
+        
+        const sessions = await res.json();
+        countEl.innerText = sessions.length;
+        hasPrimarySession = sessions.some(s => s.isPrimary);
+
+        listEl.innerHTML = '';
+        if (sessions.length === 0) {
+            listEl.innerHTML = '<div class="list-item-placeholder">No active sessions found.</div>';
+            return;
+        }
+
+        sessions.forEach(session => {
+            const dateStr = new Date(session.lastActive).toLocaleString();
+            
+            let badges = '';
+            if (session.isCurrentDevice) {
+                badges += `<span style="font-size: 0.7rem; background: #dcfce7; color: #16a34a; padding: 2px 6px; border-radius: 4px; margin-left: 8px;">Current</span>`;
+            }
+            if (session.isPrimary) {
+                badges += `<span style="font-size: 0.7rem; background: #fef08a; color: #854d0e; padding: 2px 6px; border-radius: 4px; margin-left: 8px;"><i class="fa-solid fa-star"></i> Primary</span>`;
+            }
+
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.style.display = 'flex';
+            item.style.justifyContent = 'space-between';
+            item.style.alignItems = 'center';
+
+            item.innerHTML = `
+                <div class="btn-content" style="flex:1;">
+                    <div class="icon-box ${session.isCurrentDevice ? 'green' : 'gray'}">
+                        <i class="fa-solid ${session.deviceName.toLowerCase().includes('mobile') || session.deviceName.toLowerCase().includes('iphone') || session.deviceName.toLowerCase().includes('android') ? 'fa-mobile-screen' : 'fa-laptop'}"></i>
+                    </div>
+                    <div class="list-info">
+                        <span class="list-title">${session.deviceName} ${badges}</span>
+                        <span class="list-sub" style="font-size: 0.75rem;">${session.location} • Last active: ${dateStr}</span>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    ${!session.isPrimary ? `<button onclick="setPrimarySession('${session.id}')" style="background:none; border:none; color:#94a3b8; cursor:pointer;" title="Set as Primary"><i class="fa-solid fa-star"></i></button>` : ''}
+                    <button onclick="logoutSession('${session.id}', ${session.isPrimary})" style="background:none; border:none; color:#ef4444; cursor:pointer;" title="Log Out Device"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            `;
+            listEl.appendChild(item);
+        });
+    } catch (err) {
+        listEl.innerHTML = '<div class="list-item-placeholder" style="color:#ef4444;">Failed to load sessions.</div>';
+    }
+}
+
+function setPrimarySession(id) {
+    currentSessionAction = 'set-primary';
+    currentSessionIdTarget = id;
+    document.getElementById('session-pass-title').innerText = 'Set Primary Device';
+    document.getElementById('session-pass-desc').innerText = 'Enter your password to set this as the primary device.';
+    document.getElementById('input-session-pass').value = '';
+    document.getElementById('modal-session-pass').classList.remove('hidden');
+}
+
+function logoutSession(id, isPrimary) {
+    if (isPrimary) {
+        currentSessionAction = 'logout';
+        currentSessionIdTarget = id;
+        document.getElementById('session-pass-title').innerText = 'Remove Primary Device';
+        document.getElementById('session-pass-desc').innerText = 'Enter your password to log out the primary device.';
+        document.getElementById('input-session-pass').value = '';
+        document.getElementById('modal-session-pass').classList.remove('hidden');
+    } else {
+        executeSessionAction('logout', id, null);
+    }
+}
+
+async function submitSessionPass() {
+    const password = document.getElementById('input-session-pass').value;
+    if (!password) return showToast("Password required", "warning");
+
+    const btn = document.getElementById('btn-session-pass-submit');
+    btn.innerText = 'Verifying...';
+    btn.disabled = true;
+
+    await executeSessionAction(currentSessionAction, currentSessionIdTarget, password);
+
+    btn.innerText = 'Verify';
+    btn.disabled = false;
+}
+
+async function executeSessionAction(action, id, password) {
+    try {
+        let endpoint = '';
+        if (action === 'set-primary') endpoint = `/sessions/${id}/set-primary`;
+        else if (action === 'logout') endpoint = `/sessions/${id}/logout`;
+        else if (action === 'logout-all') endpoint = `/logout-all`;
+
+        const body = password ? JSON.stringify({ password }) : undefined;
+        const headers = { 'Content-Type': 'application/json' };
+
+        const res = await fetch(`${API_URL}${endpoint}`, {
+            method: 'POST',
+            headers,
+            body
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || "Success", "success");
+            document.getElementById('modal-session-pass').classList.add('hidden');
+            
+            if (action === 'logout-all') {
+                localStorage.removeItem('userEmail');
+                window.location.href = 'index.html';
+            } else {
+                // If we logged out ourselves
+                if (action === 'logout' && data.message.includes('successfully')) {
+                    // We might have just logged ourselves out, check if token still works
+                    const checkRes = await fetch(`${API_URL}/health`);
+                    if (!checkRes.ok) {
+                        window.location.href = 'index.html';
+                        return;
+                    }
+                }
+                loadSessions();
+            }
+        } else {
+            showToast(data.error || "Action failed", "error");
+        }
+    } catch (err) {
+        showToast("Server error", "error");
+    }
+}
+
+async function logoutAllDevices() {
+    if (hasPrimarySession) {
+        currentSessionAction = 'logout-all';
+        currentSessionIdTarget = 'all';
+        closeModals();
+        document.getElementById('session-pass-title').innerText = 'Log Out All Devices';
+        document.getElementById('session-pass-desc').innerText = 'A primary device is set. Enter your password to log out all devices.';
+        document.getElementById('input-session-pass').value = '';
+        document.getElementById('modal-session-pass').classList.remove('hidden');
+    } else {
+        executeSessionAction('logout-all', 'all', null);
+    }
+}
+
 function initGlobalOtaChecker() {
     async function checkPendingUpdates() {
         try {
             const res = await fetch(`${API_URL}/user/pending-updates`, {
-                headers: { 'x-access-token': token }
+                headers: {}
             });
             if (!res.ok) return;
             const data = await res.json();
@@ -1643,7 +1884,7 @@ function initGlobalOtaChecker() {
         try {
             const res = await fetch(`${API_URL}/user/trigger-update`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ firmwareId })
             });
             const data = await res.json();
@@ -1670,7 +1911,7 @@ function initGlobalOtaChecker() {
         try {
             await fetch(`${API_URL}/user/update-preference`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ snoozeUntil: snoozeUntil.toISOString() })
             });
             showToast('Update snoozed for 3 days', 'info');

@@ -27,6 +27,10 @@
                     <input type="password" id="password" class="input-field" placeholder="Password" required>
                     <i class="fa-solid fa-eye-slash toggle-password" onclick="togglePassword('password', this)"></i>
                 </div>
+                <div class="form-group stay-logged-in" style="display:flex; align-items:center; gap:8px; margin: -4px 0 4px 2px;">
+                    <input type="checkbox" id="stay-logged-in" style="width:16px; height:16px; accent-color: var(--primary-color, #5865F2); cursor:pointer;">
+                    <label for="stay-logged-in" style="font-size:0.85rem; color:#888; cursor:pointer; user-select:none;">Stay Logged In</label>
+                </div>
                 <button type="submit" class="btn-primary">Log In</button>
                 <p class="auth-switch" onclick="toggleAuth('register')">Need an account? Sign up</p>
             </form>

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/device_provider.dart';
 import '../services/api_service.dart';
+import '../widgets/skeleton_loader.dart';
 
 class EnergyScreen extends StatefulWidget {
   @override
@@ -141,7 +142,16 @@ class _EnergyScreenState extends State<EnergyScreen> {
         toolbarHeight: 80,
       ),
       body: _isLoading 
-        ? Center(child: CircularProgressIndicator(color: Colors.white))
+        ? Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 800),
+              child: ListView.builder(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 120),
+                itemCount: 8,
+                itemBuilder: (context, index) => SkeletonListTile(),
+              ),
+            ),
+          )
         : _history.isEmpty 
           ? Center(child: Text('No activity found.', style: TextStyle(color: Colors.white70, fontSize: 16)))
           : Center(

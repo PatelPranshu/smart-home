@@ -611,6 +611,10 @@ header h2 {
     animation: spin 1s linear infinite;
 }
 
+.spinning {
+    animation: spin 1s linear infinite !important;
+}
+
 @keyframes spin {
     0% {
         transform: rotate(0deg);

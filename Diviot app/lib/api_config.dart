@@ -5,6 +5,6 @@ class ApiConfig {
     'http://10.0.2.2:3000/api',
   ];
   
-  // Use the production server as default
-  static String currentServer = servers[0];
+  // Use the local server for testing on emulator
+  static String currentServer = servers[2];
 }

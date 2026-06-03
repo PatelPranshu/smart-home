@@ -20,18 +20,21 @@ const PIN_MAP = [
     { r: 33, s: 21 }, { r: 32, s: 34 }, { r: 4, s: 35 }
 ];
 
-// ── Auth Check ──
-const token = localStorage.getItem('token');
-if (!token) {
-    alert("Admin login required.");
-    window.location.href = 'index.html';
-} else {
+// ── Auth Check (Session-based) ──
+// Session is restored by apiConfig.js initSession() before page renders
+(async () => {
+    const hasSession = await initSession();
+    if (!hasSession) {
+        alert("Admin login required.");
+        window.location.href = 'index.html';
+        return;
+    }
     const overlay = document.getElementById('auth-overlay');
     if (overlay) overlay.style.display = 'none';
     loadData();
     // Auto-refresh every 10 seconds
     setInterval(loadData, 10000);
-}
+})();
 
 // ═══════════════════════════════════════════
 // CORE DATA LOADING
@@ -40,7 +43,7 @@ if (!token) {
 async function loadData() {
     try {
         const resStats = await fetch(`${API_URL}/admin/stats`, {
-            headers: { 'x-access-token': token }
+            headers: {}
         });
 
         if (resStats.status === 403) {
@@ -56,7 +59,7 @@ async function loadData() {
         animateValue('val-unsold', stats.unownedDevices || 0);
 
         const resDev = await fetch(`${API_URL}/admin/devices`, {
-            headers: { 'x-access-token': token }
+            headers: {}
         });
         const devices = await resDev.json();
         renderTable(devices);
@@ -139,7 +142,7 @@ async function submitCreateDevice() {
     try {
         const res = await fetch(`${API_URL}/admin/create`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceId, secretCode, channels })
         });
         const data = await res.json();
@@ -163,7 +166,7 @@ async function submitEditChannels() {
     try {
         const res = await fetch(`${API_URL}/admin/device/channels`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceId, channels })
         });
         if (res.ok) { document.getElementById('edit-modal').style.display = 'none'; loadData(); }
@@ -176,7 +179,7 @@ async function unlinkUser(id) {
     try {
         const res = await fetch(`${API_URL}/admin/unlink`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceId: id })
         });
         if (res.ok) loadData();
@@ -187,7 +190,7 @@ async function deleteDevice(id) {
     if (!confirm(`Permanently delete ${id}?`)) return;
     try {
         const res = await fetch(`${API_URL}/admin/device/${id}`, {
-            method: 'DELETE', headers: { 'x-access-token': token }
+            method: 'DELETE', headers: {}
         });
         if (res.ok) loadData();
     } catch (err) { alert("Delete failed"); }
@@ -312,7 +315,7 @@ async function toggleInversion(deviceId, switchId, isInverted) {
     try {
         const res = await fetch(`${API_URL}/admin/device/invert-logic`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceId, switchId, inverted: isInverted })
         });
         if (res.ok) loadData();
@@ -326,20 +329,27 @@ async function toggleInversion(deviceId, switchId, isInverted) {
 
 function openLogoutModal() { const m = document.getElementById('logout-modal'); if (m) m.style.display = 'flex'; }
 function closeLogoutModal() { const m = document.getElementById('logout-modal'); if (m) m.style.display = 'none'; }
-function logoutThisDevice() { localStorage.removeItem('token'); window.location.href = 'index.html'; }
+
+async function logoutThisDevice() {
+    try {
+        await fetch(`${API_URL}/logout`, { method: 'POST', credentials: 'include' });
+    } catch (e) { console.error('Logout request failed:', e); }
+    clearAccessToken();
+    window.location.href = 'index.html';
+}
 
 async function logoutAllDevices() {
     try {
         await fetch(`${API_URL}/logout-all`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token }
+            headers: { 'Content-Type': 'application/json' }
         });
     } catch (err) { console.error("Logout all failed"); }
-    finally { logoutThisDevice(); }
+    finally { await logoutThisDevice(); }
 }
 
 function adminLogin() {
-    if (token) {
+    if (getAccessToken()) {
         document.getElementById('auth-overlay').style.display = 'none';
         loadData();
     } else { window.location.href = 'index.html'; }
@@ -362,7 +372,7 @@ function formatDate(dateStr) {
 async function loadFirmwareHistory() {
     try {
         const res = await fetch(`${API_URL}/admin/firmware`, {
-            headers: { 'x-access-token': token }
+            headers: {}
         });
         if (!res.ok) return;
         const releases = await res.json();
@@ -420,7 +430,7 @@ async function cancelScheduledUpdate(firmwareId, version) {
     try {
         const res = await fetch(`${API_URL}/admin/firmware/cancel`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ firmwareId })
         });
         const data = await res.json();
@@ -438,7 +448,7 @@ async function cancelScheduledUpdate(firmwareId, version) {
 async function loadDeviceVersions() {
     try {
         const res = await fetch(`${API_URL}/admin/device-versions`, {
-            headers: { 'x-access-token': token }
+            headers: {}
         });
         if (!res.ok) return;
         const devices = await res.json();
@@ -542,7 +552,7 @@ async function submitScheduleUpdate() {
     try {
         const res = await fetch(`${API_URL}/admin/firmware`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 version, githubUrl,
                 scheduledAt: new Date(scheduledAt).toISOString(),
@@ -589,7 +599,7 @@ async function submitRollback() {
     try {
         const res = await fetch(`${API_URL}/admin/firmware/rollback`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ firmwareId, targetType, targetDevices })
         });
         const data = await res.json();

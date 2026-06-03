@@ -11,6 +11,79 @@ const SERVERS = [
     
 ];
 
+// ==========================================
+// IN-MEMORY ACCESS TOKEN MANAGEMENT
+// ==========================================
+// SECURITY: Access token is NEVER stored in localStorage.
+// It lives only in this JS variable and is lost on page refresh.
+// Session is restored via the HttpOnly refreshToken cookie on page load.
+
+let _currentAccessToken = null;
+
+/** Get the current in-memory access token. */
+function getAccessToken() { return _currentAccessToken; }
+
+/** Set the in-memory access token (called after login or refresh). */
+function setAccessToken(token) { _currentAccessToken = token; }
+
+/** Clear the in-memory access token (called on logout). */
+function clearAccessToken() { _currentAccessToken = null; }
+
+// ==========================================
+// SESSION RESTORATION (Silent Refresh on Page Load)
+// ==========================================
+
+/**
+ * Attempts to restore an existing session by calling /api/refresh-token.
+ * The HttpOnly cookie is sent automatically by the browser.
+ * Returns true if session was restored, false otherwise.
+ */
+async function initSession() {
+    try {
+        const token = await tryRefreshToken();
+        return !!token;
+    } catch {
+        return false;
+    }
+}
+
+// Singleton promise to prevent concurrent refresh attempts
+let _refreshPromise = null;
+
+/**
+ * Calls /api/refresh-token using the HttpOnly cookie.
+ * Uses a singleton promise so concurrent 401 retries don't fire multiple refreshes.
+ * @returns {Promise<string>} The new access token.
+ */
+async function tryRefreshToken() {
+    // If a refresh is already in flight, piggyback on it
+    if (_refreshPromise) return _refreshPromise;
+
+    _refreshPromise = (async () => {
+        // Use the lowest-level fetch to bypass our interceptors
+        const res = await _nativeFetch(`${window.API_URL}/refresh-token`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!res.ok) {
+            clearAccessToken();
+            throw new Error('Refresh failed');
+        }
+
+        const data = await res.json();
+        setAccessToken(data.token);
+        return data.token;
+    })();
+
+    try {
+        return await _refreshPromise;
+    } finally {
+        _refreshPromise = null;
+    }
+}
+
 // --- Server Mode Management ---
 // 'auto' = original failover behavior, 'manual' = user picks the server
 window.serverMode = localStorage.getItem('serverMode') || 'auto';
@@ -99,9 +172,8 @@ async function checkServerHealth(serverUrl) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5-second timeout
 
-        // Use the original fetch to avoid triggering our own interceptor
-        const fetchFn = typeof _originalFetch !== 'undefined' ? _originalFetch : window.fetch;
-        const response = await fetchFn(`${serverUrl}/health?t=${Date.now()}`, {
+        // Use the native fetch to avoid triggering our own interceptor
+        const response = await _nativeFetch(`${serverUrl}/health?t=${Date.now()}`, {
             method: 'GET',
             signal: controller.signal
         });
@@ -179,19 +251,91 @@ function _startManualRevertCountdown() {
 
 
 
-// --- GLOBAL FETCH INTERCEPTOR FOR AUTOMATIC FAILOVER ---
-const _originalFetch = window.fetch;
+// --- GLOBAL FETCH INTERCEPTOR (Auth + Failover) ---
+// Saves native fetch ONCE before any wrappers
+const _nativeFetch = window.fetch;
+
+// Flag to prevent the interceptor from intercepting its own refresh calls
+let _isRefreshing = false;
 
 window.fetch = async function (...args) {
+    let [input, init] = args;
+    init = init || {};
+
+    // Determine the target URL
+    const targetUrl = input instanceof Request ? input.url : input.toString();
+    const isApiRequest = SERVERS.some(server => targetUrl.startsWith(server));
+
+    // ── Auto-inject auth headers & credentials for API requests ──
+    if (isApiRequest) {
+        // Ensure credentials: 'include' so the HttpOnly cookie is sent
+        init.credentials = 'include';
+
+        // Inject Authorization: Bearer header if we have an access token
+        const token = getAccessToken();
+        if (token) {
+            if (!init.headers) {
+                init.headers = {};
+            }
+            // Support both plain objects and Headers instances
+            if (init.headers instanceof Headers) {
+                if (!init.headers.has('Authorization')) {
+                    init.headers.set('Authorization', `Bearer ${token}`);
+                }
+            } else {
+                if (!init.headers['Authorization'] && !init.headers['authorization']) {
+                    init.headers['Authorization'] = `Bearer ${token}`;
+                }
+            }
+        }
+    }
+
     let res;
 
     try {
-        res = await _originalFetch.apply(this, args);
+        res = await _nativeFetch(input, init);
 
-        if (res.status === 401) {
+        // ── Handle 401: Silent Refresh ──
+        if (res.status === 401 && isApiRequest && !_isRefreshing) {
+            // Don't try to refresh if we're on the login page or this IS the refresh call
+            const isRefreshEndpoint = targetUrl.includes('/refresh-token');
+            const isLoginEndpoint = targetUrl.includes('/api/login');
+            const isLogoutEndpoint = targetUrl.includes('/api/logout');
+
+            if (!isRefreshEndpoint && !isLoginEndpoint && !isLogoutEndpoint) {
+                try {
+                    _isRefreshing = true;
+                    await tryRefreshToken();
+                    _isRefreshing = false;
+
+                    // Retry the original request with the new token
+                    const newToken = getAccessToken();
+                    if (newToken) {
+                        if (init.headers instanceof Headers) {
+                            init.headers.set('Authorization', `Bearer ${newToken}`);
+                        } else {
+                            init.headers = init.headers || {};
+                            init.headers['Authorization'] = `Bearer ${newToken}`;
+                        }
+                    }
+
+                    // Retry
+                    return await _nativeFetch(input, init);
+                } catch (refreshErr) {
+                    _isRefreshing = false;
+                    // Refresh failed — session is dead, redirect to login
+                    clearAccessToken();
+                    if (!window.location.pathname.endsWith('index.html') && window.location.pathname !== '/') {
+                        window.location.href = 'index.html';
+                    }
+                    return res; // Return the original 401
+                }
+            }
+
             return res;
         }
 
+        // ── Handle 502/503: Server failover ──
         if (res.status === 502 || res.status === 503) {
             throw new Error(`Server returned ${res.status}`);
         }
@@ -201,9 +345,6 @@ window.fetch = async function (...args) {
 
         return res;
     } catch (error) {
-        const targetUrl = args[0] instanceof Request ? args[0].url : args[0].toString();
-        const isApiRequest = SERVERS.some(server => targetUrl.startsWith(server));
-
         if (isApiRequest) {
             console.warn(`[API] Network error or server offline on ${targetUrl}:`, error.message);
 
@@ -223,15 +364,24 @@ window.fetch = async function (...args) {
 
                 console.log(`[API] Retrying request on new server: ${newTargetUrl}`);
 
-                let newArgs = [newTargetUrl];
-                if (args.length > 1) {
-                    newArgs.push(args[1]);
-                } else if (args[0] instanceof Request) {
-                    const newReq = new Request(newTargetUrl, args[0]);
-                    newArgs = [newReq];
+                // Re-inject fresh auth header for the new server
+                const freshToken = getAccessToken();
+                if (freshToken) {
+                    init.headers = init.headers || {};
+                    if (init.headers instanceof Headers) {
+                        init.headers.set('Authorization', `Bearer ${freshToken}`);
+                    } else {
+                        init.headers['Authorization'] = `Bearer ${freshToken}`;
+                    }
                 }
 
-                return await _originalFetch.apply(this, newArgs);
+                let newArgs = [newTargetUrl, init];
+                if (input instanceof Request) {
+                    const newReq = new Request(newTargetUrl, input);
+                    newArgs = [newReq, init];
+                }
+
+                return await _nativeFetch.apply(this, newArgs);
             }
         }
 

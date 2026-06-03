@@ -339,7 +339,11 @@ void callback(char *topic, byte *payload, unsigned int length) {
   // 1. OTA Command
   if (String(topic) == otaTopic) {
     StaticJsonDocument<200> doc;
-    deserializeJson(doc, message);
+    DeserializationError err = deserializeJson(doc, message);
+    if (err) {
+      Serial.println("[MQTT] OTA: Invalid JSON, ignoring.");
+      return;
+    }
     const char *downloadUrl = doc["url"];
     if (downloadUrl) {
       performOTA(String(downloadUrl));
@@ -377,7 +381,11 @@ void callback(char *topic, byte *payload, unsigned int length) {
   // 3. WiFi Update
   if (String(topic) == wifiTopic) {
     StaticJsonDocument<200> doc;
-    deserializeJson(doc, message);
+    DeserializationError err = deserializeJson(doc, message);
+    if (err) {
+      Serial.println("[MQTT] WiFi: Invalid JSON, ignoring.");
+      return;
+    }
     const char *newSSID = doc["ssid"];
     const char *newPass = doc["pass"];
     if (newSSID && newPass) {
@@ -563,7 +571,7 @@ void setup() {
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
     client.setBufferSize(4096);
-    client.setKeepAlive(5);
+    client.setKeepAlive(10);
   }
 
   // START WATCHDOG HERE (Final Step)
