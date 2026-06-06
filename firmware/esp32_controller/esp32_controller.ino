@@ -631,9 +631,25 @@ void handleMQTT() {
       client.subscribe(fanSpeedTopic.c_str()); // [FIX] Subscribe to fan speed
       client.subscribe(checkTopic.c_str());
 
-      // 3. Request state sync from server (server is source of truth)
-      // Server will push correct state via commandTopic for each switch
-      client.publish(syncTopic.c_str(), "1");
+      // 3. ESP32 IS SOURCE OF TRUTH: Push local state to server on reconnect
+      // This ensures physical switch changes made while offline are preserved
+      // and the server DB is updated to match the real hardware state.
+      for (int i = 0; i < NUM_RELAYS; i++) {
+        StaticJsonDocument<256> doc;
+        doc["switchId"] = i;
+        doc["state"] = relayState[i];
+        doc["reconnect"] = true; // Flag: server must accept, not override
+        char buffer[256];
+        serializeJson(doc, buffer);
+        client.publish(updateTopic.c_str(), buffer);
+        client.loop(); // Prevent buffer overflow
+        delay(10);
+      }
+
+      // Clear pending update flags since we just pushed all states
+      for (int i = 0; i < NUM_RELAYS; i++) {
+        mqttNeedsUpdate[i] = false;
+      }
 
       // 4. Report firmware version to server (retained)
       client.publish(versionTopic.c_str(), FIRMWARE_VERSION, true);

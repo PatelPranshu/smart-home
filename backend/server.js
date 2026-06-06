@@ -682,8 +682,9 @@ mqttClient.on('message', async (topic, message) => {
                 emitDeviceUpdates(device.owner._id ? device.owner._id.toString() : device.owner.toString());
             }
 
-            // Skip History and Google Reporting if this is just a status check refresh
-            if (data.refresh) return;
+            // Skip History and Google Reporting for status check refreshes
+            // and reconnect state pushes (ESP32 pushing its local state after reconnecting)
+            if (data.refresh || data.reconnect) return;
 
             // BACKGROUND TASKS: Run History and Google reporting via queue
             BackgroundTaskQueue.enqueue(async () => {
@@ -712,16 +713,11 @@ mqttClient.on('message', async (topic, message) => {
         // 2. Device Rebooted -> Restore State
         // -------------------------------------------------
         else if (type === 'sync') {
-            console.log(`Device ${deviceId} rebooted. Restoring state...`);
-            const device = await Device.findOne({ deviceId }).lean();
-            if (device) {
-                device.switches.forEach(sw => {
-                    // APPLY INVERSION: Send correct hardware signal based on stored user intent
-                    const hardwareSignal = sw.inverted ? !sw.state : sw.state;
-                    const payload = JSON.stringify({ switchId: sw.id, state: hardwareSignal });
-                    mqttClient.publish(`devices/${deviceId}/command`, payload);
-                });
-            }
+            // ESP32 IS SOURCE OF TRUTH on reconnect.
+            // The device pushes its own local state via /update topic with "reconnect: true".
+            // We no longer push DB state back to the device, as that would overwrite
+            // physical switch changes made while the device was offline.
+            console.log(`Device ${deviceId} reconnected. ESP32 is source of truth — no state push from server.`);
         }
 
         // -------------------------------------------------
