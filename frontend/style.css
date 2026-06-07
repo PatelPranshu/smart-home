@@ -1553,7 +1553,6 @@ input:checked+.slider:before {
     /* Force 2 columns */
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
-    padding-bottom: 100px;
     height: auto;
 }
 
