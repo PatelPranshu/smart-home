@@ -8,7 +8,8 @@ const SwitchSchema = new mongoose.Schema({
   inverted: { type: Boolean, default: false },
   lastOnTime: { type: Date, default: null },
   timerExpiresAt: { type: Date, default: null },
-  speed: { type: Number, default: 0, min: 0, max: 4 }  // Fan speed: 0=off, 1=Low, 2=Med, 3=High, 4=Turbo
+  speed: { type: Number, default: 0, min: 0, max: 4 },  // Fan speed: 0=off, 1=Low, 2=Med, 3=High, 4=Turbo
+  isFavorite: { type: Boolean, default: false }
 }, { _id: false });
 
 const DeviceSchema = new mongoose.Schema({

@@ -78,6 +78,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
+    // ── INSTANT CACHE RENDER: Show cached devices immediately (before auth) ──
+    if (path.includes('home.html')) {
+        renderCachedDevices();
+    }
+
     // ── All other pages: require a valid session ──
     const hasSession = await initSession();
     if (!hasSession) {
@@ -186,19 +191,66 @@ function initLogin() {
 // ==========================================
 // 3. PAGE: HOME (home.html)
 // ==========================================
+/**
+ * Renders cached devices from localStorage instantly — called BEFORE auth
+ * so the user sees their devices with zero latency on page load.
+ */
+function renderCachedDevices() {
+    const grid = document.getElementById('device-grid');
+    if (!grid) return;
+
+    const cached = localStorage.getItem('cachedDevices');
+    if (!cached) return;
+
+    try {
+        const parsed = JSON.parse(cached);
+        window.allDevices = parsed;
+
+        if (parsed.length > 0) {
+            let sensorDevice = null;
+            const preferredId = localStorage.getItem('primarySensorId');
+            if (preferredId) sensorDevice = parsed.find(d => d.deviceId === preferredId);
+            if (!sensorDevice) sensorDevice = parsed.find(d => d.temperature > 0 || d.humidity > 0) || parsed[0];
+
+            const tempEl = document.getElementById('temp-display');
+            const humEl = document.getElementById('hum-display');
+            if (tempEl) tempEl.innerText = `${(sensorDevice.temperature || 0).toFixed(1)}°C`;
+            if (humEl) humEl.innerText = `${(sensorDevice.humidity || 0).toFixed(0)}%`;
+        }
+
+        // Set date immediately too
+        const dateOptions = { weekday: 'long', month: 'long', day: 'numeric' };
+        const dateEl = document.getElementById('date-display');
+        if (dateEl) dateEl.innerText = new Date().toLocaleDateString('en-US', dateOptions);
+
+        // Render cached title if available
+        const cachedTitle = localStorage.getItem('cachedHomeTitle');
+        if (cachedTitle) {
+            const titleEl = document.getElementById('dashboard-title');
+            if (titleEl) titleEl.innerText = cachedTitle;
+        }
+
+        renderGrid(parsed);
+        console.log('[Cache] Rendered', parsed.length, 'devices from localStorage');
+    } catch (e) {
+        console.error('[Cache] Failed to load cached devices', e);
+    }
+}
+
 async function initHome() {
     const dateOptions = { weekday: 'long', month: 'long', day: 'numeric' };
     document.getElementById('date-display').innerText = new Date().toLocaleDateString('en-US', dateOptions);
 
-    // --- Fetch Custom Title ---
-    try {
-        const res = await fetch(`${API_URL}/user/profile`, { headers: {} });
-        const data = await res.json();
-        if (data.homeTitle) {
-            document.getElementById('dashboard-title').innerText = data.homeTitle;
-        }
-    } catch (err) { console.error("Failed to load title"); }
-
+    // --- Fetch Custom Title (Non-blocking — don't delay device rendering) ---
+    fetch(`${API_URL}/user/profile`, { headers: {} })
+        .then(res => res.json())
+        .then(data => {
+            if (data.homeTitle) {
+                document.getElementById('dashboard-title').innerText = data.homeTitle;
+                localStorage.setItem('cachedHomeTitle', data.homeTitle);
+            }
+        })
+        .catch(err => console.error('Failed to load title'));
 
     fetchDevices();
 
@@ -415,9 +467,15 @@ async function initHome() {
         }
         if (activeOption) activeOption.classList.add('selected');
 
-        // 2. CHECK FOR ACTIVE TIMER
+        // 2. CHECK FOR ACTIVE TIMER AND FAVORITE STATUS
         const device = window.allDevices.find(d => d.deviceId === deviceId);
         const sw = device ? device.switches.find(s => s.id === switchId) : null;
+
+        // Setup Favorite Toggle
+        const favoriteToggle = document.getElementById('edit-favorite');
+        if (favoriteToggle) {
+            favoriteToggle.checked = sw ? !!sw.isFavorite : false;
+        }
 
         const inputUI = document.getElementById('timer-input-ui');
         const activeUI = document.getElementById('timer-active-ui');
@@ -509,6 +567,8 @@ async function initHome() {
 
     window.saveChanges = async () => {
         const newName = document.getElementById('edit-name').value;
+        const newFavoriteStatus = document.getElementById('edit-favorite') ? document.getElementById('edit-favorite').checked : false;
+
         try {
             await fetch(`${API_URL}/edit`, {
                 method: 'POST',
@@ -518,6 +578,17 @@ async function initHome() {
                     switchId: window.currentSwitchId,
                     newName,
                     newType: window.selectedType
+                })
+            });
+
+            // Always sync favorite status when saving settings
+            await fetch(`${API_URL}/favorite`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    deviceId: window.currentDeviceId,
+                    switchId: window.currentSwitchId,
+                    isFavorite: newFavoriteStatus
                 })
             });
 
@@ -1355,16 +1426,16 @@ async function fetchDevices() {
 }
 
 function renderGrid(devices) {
-    const grid = document.getElementById('device-grid');
-    if (!grid) return;
+    const mainGrid = document.getElementById('device-grid');
+    const favGrid = document.getElementById('favorites-grid');
+    const favSection = document.getElementById('favorites-section');
+    const allTitle = document.getElementById('all-devices-title');
 
+    if (!mainGrid || !favGrid) return;
 
-    // --- NEW: Global Offline Check ---
-    // If we have devices, but ALL of them are offline, warn the user globally
+    // --- Global Offline Check ---
     const allOffline = devices.length > 0 && devices.every(d => !d.isOnline);
     if (allOffline) {
-        // You can use your existing showToast function
-        // Debounce this so it doesn't spam (simple check)
         if (!window.hasShownOfflineToast) {
             showToast("⚠️ System Offline: Cannot reach Devices", "error");
             window.hasShownOfflineToast = true;
@@ -1373,41 +1444,61 @@ function renderGrid(devices) {
         window.hasShownOfflineToast = false;
     }
 
+    // --- Flatten all switches into a single array ---
+    const flattened = [];
     devices.forEach(device => {
-        const isOnline = device.isOnline;
-
         device.switches.forEach(sw => {
-            const domId = `card-${device.deviceId}-${sw.id}`;
-            let card = document.getElementById(domId);
-            const dbType = sw.type || 'light';
-            const iconClass = typeIcons[dbType] || 'fa-power-off';
+            flattened.push({ device, sw });
+        });
+    });
 
-            let runtimeText = "", timerText = "";
-            if (isOnline && sw.state && sw.lastOnTime) {
-                const diffMs = new Date() - new Date(sw.lastOnTime);
-                const mins = Math.floor(diffMs / 60000);
-                const hrs = Math.floor(mins / 60);
-                const days = Math.floor(hrs / 24);
+    // Split into Favorites and Regulars
+    const favorites = flattened.filter(item => item.sw.isFavorite);
+    const regulars = flattened.filter(item => !item.sw.isFavorite);
 
-                if (days > 0) {
-                    runtimeText = `${days}d ${hrs % 24}h`;
-                } else if (hrs > 0) {
-                    runtimeText = `${hrs}h ${mins % 60}m`;
-                } else {
-                    runtimeText = `${mins} mins`;
-                }
+    // Toggle Section Visibility
+    if (favorites.length > 0) {
+        favSection.style.display = 'block';
+        allTitle.style.display = regulars.length > 0 ? 'block' : 'none';
+    } else {
+        favSection.style.display = 'none';
+        allTitle.style.display = 'none';
+    }
+
+    const activeCardIds = new Set();
+
+    const renderCard = ({ device, sw }, targetGrid) => {
+        const isOnline = device.isOnline;
+        const domId = `card-${device.deviceId}-${sw.id}`;
+        activeCardIds.add(domId);
+        
+        let card = document.getElementById(domId);
+        const dbType = sw.type || 'light';
+        const iconClass = typeIcons[dbType] || 'fa-power-off';
+
+        let runtimeText = "", timerText = "";
+        if (isOnline && sw.state && sw.lastOnTime) {
+            const diffMs = new Date() - new Date(sw.lastOnTime);
+            const mins = Math.floor(diffMs / 60000);
+            const hrs = Math.floor(mins / 60);
+            const days = Math.floor(hrs / 24);
+
+            if (days > 0) runtimeText = `${days}d ${hrs % 24}h`;
+            else if (hrs > 0) runtimeText = `${hrs}h ${mins % 60}m`;
+            else runtimeText = `${mins} mins`;
+        }
+        
+        if (isOnline && sw.state && sw.timerExpiresAt) {
+            const timeLeftMs = new Date(sw.timerExpiresAt) - new Date();
+            if (timeLeftMs > 0) {
+                timerText = `${Math.ceil(timeLeftMs / 60000)}m left`;
             }
-            if (isOnline && sw.state && sw.timerExpiresAt) {
-                const timeLeftMs = new Date(sw.timerExpiresAt) - new Date();
-                if (timeLeftMs > 0) {
-                    timerText = `${Math.ceil(timeLeftMs / 60000)}m left`;
-                }
-            }
+        }
 
-            if (!card) {
-                card = document.createElement('div');
-                card.id = domId;
-                card.innerHTML = `
+        if (!card) {
+            card = document.createElement('div');
+            card.id = domId;
+            card.innerHTML = `
                     <div class="offline-overlay hidden"><i class="fa-solid fa-wifi"></i><span>Disconnected</span></div>
                     <div class="card-options"><i class="fa-solid fa-ellipsis-vertical"></i></div>
                     <div class="card-header">
@@ -1417,66 +1508,80 @@ function renderGrid(devices) {
                         <div class="footer-left"><div class="device-name">${sw.name}</div><div class="device-status">OFF</div></div>
                         <div class="footer-right"><div class="runtime-display"></div><div class="timer-display"></div></div>
                     </div>`;
-                grid.appendChild(card);
-            }
+        }
 
-            const overlay = card.querySelector('.offline-overlay');
-            const optionsBtn = card.querySelector('.card-options');
+        // If card was in a different grid previously, moving it via appendChild handles it naturally
+        targetGrid.appendChild(card);
 
-            if (!isOnline) {
-                card.classList.add('device-offline');
-                overlay.classList.remove('hidden');
-                card.onclick = null;
-            } else {
-                card.classList.remove('device-offline');
-                overlay.classList.add('hidden');
-                if (!card.classList.contains('card-loading')) {
-                    card.onclick = () => toggleDevice(device.deviceId, sw.id, !sw.state, card);
-                }
-            }
+        const overlay = card.querySelector('.offline-overlay');
+        const optionsBtn = card.querySelector('.card-options');
 
-            if (optionsBtn) {
-                optionsBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    if (isOnline && window.openModal) window.openModal(device.deviceId, sw.id, sw.name, dbType);
-                };
-            }
-
-            const nameEl = card.querySelector('.device-name');
-            if (nameEl) nameEl.innerText = sw.name;
-
-            const iconEl = card.querySelector('.device-icon i');
-            if (iconEl && !card.classList.contains('card-loading')) {
-                // If offline, show broken link. If online, show device type.
-                iconEl.className = isOnline ? `fa-solid ${iconClass}` : 'fa-solid fa-link-slash';
-            }
-
-            const runtimeDiv = card.querySelector('.runtime-display');
-            const timerDiv = card.querySelector('.timer-display');
-            if (runtimeDiv) { runtimeDiv.innerText = runtimeText; runtimeDiv.style.display = runtimeText ? 'block' : 'none'; }
-            if (timerDiv) { timerDiv.innerText = timerText; timerDiv.style.display = timerText ? 'block' : 'none'; }
-
+        if (!isOnline) {
+            card.classList.add('device-offline');
+            overlay.classList.remove('hidden');
+            card.onclick = null;
+        } else {
+            card.classList.remove('device-offline');
+            overlay.classList.add('hidden');
             if (!card.classList.contains('card-loading')) {
-                const isActive = sw.state;
-                const statusText = card.querySelector('.device-status');
-                const iconDiv = card.querySelector('.device-icon');
+                card.onclick = () => toggleDevice(device.deviceId, sw.id, !sw.state, card);
+            }
+        }
 
-                let baseClass = 'device-card';
-                if (!isOnline) baseClass += ' device-offline';
-                else if (isActive) baseClass += ' is-active';
+        if (optionsBtn) {
+            optionsBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (isOnline && window.openModal) window.openModal(device.deviceId, sw.id, sw.name, dbType);
+            };
+        }
 
-                // If timerText has content, add the 'has-timer' class
-                if (timerText) baseClass += ' has-timer';
-                card.className = baseClass;
+        const nameEl = card.querySelector('.device-name');
+        if (nameEl) nameEl.innerText = sw.name;
 
-                if (iconDiv) iconDiv.className = isActive ? 'device-icon icon-on' : 'device-icon icon-off';
-                if (statusText) {
-                    statusText.className = isActive ? 'device-status text-on' : 'device-status text-off';
-                    statusText.innerText = isActive ? 'ON' : 'OFF';
-                }
+        const iconEl = card.querySelector('.device-icon i');
+        if (iconEl && !card.classList.contains('card-loading')) {
+            iconEl.className = isOnline ? `fa-solid ${iconClass}` : 'fa-solid fa-link-slash';
+        }
+
+        const runtimeDiv = card.querySelector('.runtime-display');
+        const timerDiv = card.querySelector('.timer-display');
+        if (runtimeDiv) { runtimeDiv.innerText = runtimeText; runtimeDiv.style.display = runtimeText ? 'block' : 'none'; }
+        if (timerDiv) { timerDiv.innerText = timerText; timerDiv.style.display = timerText ? 'block' : 'none'; }
+
+        if (!card.classList.contains('card-loading')) {
+            const isActive = sw.state;
+            const statusText = card.querySelector('.device-status');
+            const iconDiv = card.querySelector('.device-icon');
+
+            let baseClass = 'device-card';
+            if (!isOnline) baseClass += ' device-offline';
+            else if (isActive) baseClass += ' is-active';
+            if (timerText) baseClass += ' has-timer';
+            
+            card.className = baseClass;
+
+            if (iconDiv) iconDiv.className = isActive ? 'device-icon icon-on' : 'device-icon icon-off';
+            if (statusText) {
+                statusText.className = isActive ? 'device-status text-on' : 'device-status text-off';
+                statusText.innerText = isActive ? 'ON' : 'OFF';
+            }
+        }
+    };
+
+    favorites.forEach(item => renderCard(item, favGrid));
+    regulars.forEach(item => renderCard(item, mainGrid));
+
+    // Remove stale cards that no longer exist in either grid
+    const removeStale = (gridNode) => {
+        Array.from(gridNode.children).forEach(child => {
+            if (child.id && child.id.startsWith('card-') && !activeCardIds.has(child.id)) {
+                child.remove();
             }
         });
-    });
+    };
+    
+    removeStale(favGrid);
+    removeStale(mainGrid);
 }
 
 async function toggleDevice(deviceId, switchId, newState, cardElement) {
@@ -1521,6 +1626,8 @@ async function toggleDevice(deviceId, switchId, newState, cardElement) {
         setTimeout(fetchDevices, 1000);
     }
 }
+
+
 
 // Set fan speed (1=Low, 2=Med, 3=High, 4=Turbo)
 async function setFanSpeed(deviceId, switchId, speed, cardElement) {
@@ -1655,19 +1762,23 @@ window.closeSensorModal = () => {
 
 // 2. Toggle Function
 function setView(mode) {
-    const gridContainer = document.getElementById('device-grid');
+    const mainGridContainer = document.getElementById('device-grid');
+    const favGridContainer = document.getElementById('favorites-grid');
     const btnList = document.getElementById('btn-list');
     const btnGrid = document.getElementById('btn-grid');
 
-    if (!gridContainer || !btnList || !btnGrid) return;
+    if (!btnList || !btnGrid) return;
 
     // Reset State
-    gridContainer.classList.remove('list-view');
+    if (mainGridContainer) mainGridContainer.classList.remove('list-view');
+    if (favGridContainer) favGridContainer.classList.remove('list-view');
+    
     btnList.classList.remove('active');
     btnGrid.classList.remove('active');
 
     if (mode === 'list') {
-        gridContainer.classList.add('list-view');
+        if (mainGridContainer) mainGridContainer.classList.add('list-view');
+        if (favGridContainer) favGridContainer.classList.add('list-view');
         btnList.classList.add('active');
     } else {
         btnGrid.classList.add('active');

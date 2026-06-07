@@ -42,7 +42,7 @@
             </div>
         </header>
 
-        <div class="content-area no-scroll">
+        <div class="content-area">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <h3 class="section-title" style="margin-bottom: 0;">Devices</h3>
@@ -60,7 +60,15 @@
                 </div>
             </div>
 
-            <div id="device-grid" class="device-grid"></div>
+            <div id="favorites-section" style="display: none;">
+                <h3 class="section-title" style="margin-top: 10px; margin-bottom: 10px; font-size: 1.1rem; color: #f59e0b;"><i class="fa-solid fa-star"></i> Favorites</h3>
+                <div id="favorites-grid" class="device-grid"></div>
+            </div>
+
+            <div id="all-devices-section">
+                <h3 id="all-devices-title" class="section-title" style="margin-top: 15px; margin-bottom: 10px; font-size: 1.1rem; display: none;">All Devices</h3>
+                <div id="device-grid" class="device-grid"></div>
+            </div>
         </div>
 
         <div class="bottom-nav">
@@ -159,6 +167,17 @@
                         <i class="fa-solid fa-xmark"></i>
                     </button>
                 </div>
+            </div>
+
+            <div class="modal-section" style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-star" style="color: #f59e0b;"></i>
+                    <label style="margin-bottom: 0; font-weight: 600;">Include in Favorites</label>
+                </div>
+                <label class="ios-toggle">
+                    <input type="checkbox" id="edit-favorite">
+                    <span class="ios-slider"></span>
+                </label>
             </div>
 
             <button onclick="saveChanges()" class="btn-primary" style="margin-top: 20px;">Save Changes</button>

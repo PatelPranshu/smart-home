@@ -1559,6 +1559,39 @@ app.post('/api/control', auth, [
     }
 });
 
+// Toggle Favorite Status for a Switch
+app.post('/api/favorite', auth, [
+    body('deviceId').isString().trim().escape(),
+    body('switchId').isInt(),
+    body('isFavorite').isBoolean()
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid Input' });
+
+    const { deviceId, switchId, isFavorite } = req.body;
+
+    try {
+        const device = await Device.findOne({ deviceId, owner: req.user.id }).lean();
+        if (!device) return res.status(404).json({ error: 'Device not found' });
+
+        const sw = device.switches.find(s => s.id === switchId);
+        if (!sw) return res.status(404).json({ error: 'Switch not found' });
+
+        await Device.updateOne(
+            { deviceId: deviceId, "switches.id": switchId },
+            { $set: { "switches.$.isFavorite": isFavorite } }
+        );
+
+        // Invalidate cache and emit real-time update
+        deviceCache.delete(deviceId);
+        emitDeviceUpdates(req.user.id.toString());
+
+        res.json({ status: 'ok', isFavorite });
+    } catch (err) {
+        console.error('[Favorite] Error:', err.message);
+        if (!res.headersSent) res.status(500).json({ error: 'Server Error' });
+    }
+});
 // Fan Speed Control
 app.post('/api/fan-speed', auth, [
     body('deviceId').isString().trim().escape(),

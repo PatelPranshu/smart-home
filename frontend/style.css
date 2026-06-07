@@ -259,8 +259,7 @@ header h2 {
     padding: 0 1.5rem;
 
     /* CHANGED: Add padding so content isn't hidden behind the fixed nav */
-    /* padding-bottom: 100px;  */
-    /* padding-bottom: 100px;     */
+    padding-bottom: 120px;
 
     position: relative;
 }
@@ -342,15 +341,6 @@ header h2 {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 1rem;
     height: auto;
-    overflow-y: auto;
-    padding-bottom: 160px;
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-}
-
-/* Hide scrollbar */
-.device-grid::-webkit-scrollbar {
-    display: none;
 }
 
 /* No hard breakpoints needed — auto-fill handles all screen widths naturally */
@@ -580,6 +570,53 @@ header h2 {
 
 .device-card.is-active .card-options {
     color: #1e3a8a;
+}
+
+/* iOS Style Toggle Switch */
+.ios-toggle {
+    position: relative;
+    display: inline-block;
+    width: 46px;
+    height: 26px;
+}
+
+.ios-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.ios-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #e5e7eb;
+    transition: .3s;
+    border-radius: 34px;
+}
+
+.ios-slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ios-toggle input:checked + .ios-slider {
+    background-color: #34c759; /* Apple Green */
+}
+
+.ios-toggle input:checked + .ios-slider:before {
+    transform: translateX(20px);
 }
 
 /* Offline & Loading States (Modern Ghost Style) */
@@ -1631,6 +1668,8 @@ input:checked+.slider:before {
     flex-shrink: 0;
     font-size: 1rem;
 }
+
+
 
 /* ======================================== */
 /* OTA UPDATE TOAST NOTIFICATION            */
