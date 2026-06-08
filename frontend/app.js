@@ -311,6 +311,12 @@ async function initHome() {
         }
 
         try {
+            // Guard: If socket.io CDN failed to load (slow network, adblocker), degrade gracefully
+            if (typeof io === 'undefined') {
+                console.warn('[Socket.io] Socket.io library not loaded. Real-time updates disabled.');
+                return;
+            }
+
             // Strip out '/api' so it connects to the root WebSocket server
             const socketURL = API_URL.replace(/\/api\/?$/, "");
             console.log('[Socket.io] Connecting to:', socketURL);
@@ -1391,8 +1397,16 @@ async function fetchDevices() {
         headers: {},
         cache: 'no-store'
     })
-    .then(res => res.json())
+    .then(res => {
+        if (!res.ok) {
+            console.error('fetchDevices: Server returned', res.status);
+            return;
+        }
+        return res.json();
+    })
     .then(devices => {
+        if (!devices) return;
+
         // Persist for future fast loads
         localStorage.setItem('cachedDevices', JSON.stringify(devices));
         

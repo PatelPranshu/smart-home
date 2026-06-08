@@ -866,7 +866,7 @@ const auth = async (req, res, next) => {
     // If no token found in either place, reject
     if (!token) {
         console.log("Auth Failed: No token provided");
-        return res.status(401).send("Access Denied");
+        return res.status(401).json({ error: "Access Denied" });
     }
 
     try {
@@ -875,16 +875,17 @@ const auth = async (req, res, next) => {
         // Fetch user to verify tokenVersion
         const user = await User.findById(verified.id).lean();
         if (!user) {
-            return res.status(401).send("User not found");
+            return res.status(401).json({ error: "User not found" });
         }
 
         // Only enforce tokenVersion for app tokens.
         // Google Home access tokens are signed without tokenVersion — skipping the check
         // for those prevents Google Home from permanently breaking after a "Logout All Devices".
         if (verified.tokenVersion !== undefined) {
-            if (user.tokenVersion !== verified.tokenVersion) {
+            const dbTokenVersion = user.tokenVersion || 0;
+            if (dbTokenVersion !== verified.tokenVersion) {
                 console.log("Auth Failed: Token version mismatch (logged out from all devices)");
-                return res.status(401).send("Session expired. Please log in again.");
+                return res.status(401).json({ error: "Session expired. Please log in again." });
             }
         }
 
@@ -892,7 +893,7 @@ const auth = async (req, res, next) => {
         next();
     } catch (err) {
         console.log("Auth Failed: Invalid Token");
-        res.status(400).send("Invalid Token");
+        res.status(400).json({ error: "Invalid Token" });
     }
 };
 
