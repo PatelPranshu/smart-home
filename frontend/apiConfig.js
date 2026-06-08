@@ -3,7 +3,7 @@
 // ==========================================
 
 const SERVERS = [
-    // 'http://localhost:3000/api',
+    'http://localhost:3000/api',
     'https://smart-home-04m4.onrender.com/api',
     'https://smart-home-emergency02.onrender.com/api',
 ];
