@@ -228,16 +228,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return SkeletonDeviceGrid(viewMode: _viewMode);
         }
         
-        List<Widget> allSwitches = [];
+        List<Widget> favoriteSwitches = [];
+        List<Widget> regularSwitches = [];
+        
         for (var device in provider.devices) {
           for (var sw in device.switches) {
-            allSwitches.add(_viewMode == 'grid' 
+            Widget item = _viewMode == 'grid' 
                 ? _buildTile(device, sw) 
-                : _buildListTileCard(device, sw));
+                : _buildListTileCard(device, sw);
+            if (sw.isFavorite) {
+              favoriteSwitches.add(item);
+            } else {
+              regularSwitches.add(item);
+            }
           }
         }
         
-        if (allSwitches.isEmpty) {
+        if (favoriteSwitches.isEmpty && regularSwitches.isEmpty) {
           if (!_showNoDevicesFound) {
             return SkeletonDeviceGrid(viewMode: _viewMode);
           }
@@ -354,24 +361,67 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           crossAxisCount = 3;
         }
 
-        Widget layoutWidget = _viewMode == 'grid'
-            ? GridView.count(
-                crossAxisCount: crossAxisCount,
-                padding: EdgeInsets.fromLTRB(20, 20, 20, 120),
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.1,
-                children: allSwitches,
-              )
-            : Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: 800),
-                  child: ListView(
-                    padding: EdgeInsets.fromLTRB(20, 20, 20, 120),
-                    children: allSwitches,
+        Widget buildSection(String title, List<Widget> items, {bool isFavorites = false}) {
+          if (items.isEmpty) return SizedBox.shrink();
+          
+          Widget gridOrList = _viewMode == 'grid'
+              ? GridView.count(
+                  shrinkWrap: true,
+                  physics: NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 1.1,
+                  children: items,
+                )
+              : ListView(
+                  shrinkWrap: true,
+                  physics: NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
+                  children: items,
+                );
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (title.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: 8, left: 4),
+                    child: Row(
+                      children: [
+                        if (isFavorites) Icon(Icons.star_rounded, color: Colors.amber, size: 20),
+                        if (isFavorites) SizedBox(width: 6),
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isFavorites ? Colors.amber : (isDark ? Colors.white70 : Colors.black54),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              );
+                gridOrList,
+              ],
+            ),
+          );
+        }
+
+        Widget layoutWidget = SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 120),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (favoriteSwitches.isNotEmpty)
+                buildSection('Favorites', favoriteSwitches, isFavorites: true),
+              buildSection(favoriteSwitches.isNotEmpty ? 'All Devices' : '', regularSwitches),
+            ],
+          ),
+        );
 
         final sensorCandidates = provider.devices.where((d) => d.temperature > 0 || d.humidity > 0);
         final Device? sensorDevice = sensorCandidates.isNotEmpty 
@@ -640,6 +690,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String selectedType = sw.type;
     int fanSpeed = sw.fanSpeed;
     bool isSaving = false;
+    bool isFavorite = sw.isFavorite;
     
     // Grid items
     final types = [
@@ -677,8 +728,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text('Edit Appliance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: isDark ? Colors.white : Colors.black87)),
-                      SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Edit Appliance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: isDark ? Colors.white : Colors.black87)),
+                          IconButton(
+                            icon: Icon(isFavorite ? Icons.star_rounded : Icons.star_border_rounded, color: Colors.amber, size: 32),
+                            onPressed: () => setModalState(() => isFavorite = !isFavorite),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
                       
                       // Name
                       Text('Device Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? Colors.white70 : Colors.black54)),
@@ -814,11 +874,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 setModalState(() => isSaving = true);
                                 try {
                                   await _apiService.editDevice(device.deviceId, sw.id, nameController.text.trim(), selectedType);
+                                  await _apiService.setFavorite(device.deviceId, sw.id, isFavorite);
                                   if (selectedType == 'fan') {
                                     await _apiService.setFanSpeed(device.deviceId, sw.id, fanSpeed);
                                   }
                                   showToast(context, 'Device updated!');
-                                  // Socket will push update; silent fallback fetch
+                                  
+                                  // Force immediate UI update to reflect new favorite status, name, or type
+                                  if (context.mounted) {
+                                    Provider.of<DeviceProvider>(context, listen: false).fetchDevices(showLoading: false);
+                                  }
+                                  
                                   Navigator.pop(ctx);
                                 } catch (e) {
                                   showToast(context, 'Failed to update device', isError: true);

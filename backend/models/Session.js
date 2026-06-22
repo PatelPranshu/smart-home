@@ -23,6 +23,10 @@ const SessionSchema = new mongoose.Schema({
     type: String,
     default: 'Unknown Location'
   },
+  isPersistent: {
+    type: Boolean,
+    default: false
+  },
   isPrimary: {
     type: Boolean,
     default: false

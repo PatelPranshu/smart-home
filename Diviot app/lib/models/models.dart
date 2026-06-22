@@ -7,6 +7,7 @@ class DeviceSwitch {
   final String? timerExpiresAt;
   final String? lastOnTime;
   final int fanSpeed;
+  final bool isFavorite;
 
   DeviceSwitch({
     required this.id,
@@ -17,6 +18,7 @@ class DeviceSwitch {
     this.timerExpiresAt,
     this.lastOnTime,
     this.fanSpeed = 1,
+    this.isFavorite = false,
   });
 
   factory DeviceSwitch.fromJson(Map<String, dynamic> json) {
@@ -29,6 +31,7 @@ class DeviceSwitch {
       timerExpiresAt: json['timerExpiresAt'],
       lastOnTime: json['lastOnTime'],
       fanSpeed: json['speed'] is int ? json['speed'] : (int.tryParse(json['speed']?.toString() ?? '') ?? (json['fanSpeed'] is int ? json['fanSpeed'] : (int.tryParse(json['fanSpeed']?.toString() ?? '') ?? 1))),
+      isFavorite: json['isFavorite'] == true,
     );
   }
 }

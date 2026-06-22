@@ -97,3 +97,15 @@ GoogleService-Info.plist
 *service_account*.json
 *smarthubpranshu*.json
 smarthubpranshu*.json
+
+# --- AI Agent Skills & Config ---
+.agents/
+
+# --- Backend Runtime Artifacts ---
+backend/firmware_cache/
+
+# --- Debug / Utility Scripts (DO NOT COMMIT) ---
+verify_auth.js
+
+# --- Root Lock File (Not a runnable project) ---
+/package-lock.json

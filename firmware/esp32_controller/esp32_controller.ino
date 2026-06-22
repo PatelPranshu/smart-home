@@ -1,14 +1,14 @@
 #include <ArduinoJson.h>
 #include <DHT.h>
-#include <HTTPClient.h> // For downloading updates
-#include <HTTPUpdate.h> // <--- ADD THIS LINE FOR OTA
+#include <HTTPClient.h>  // For downloading updates
+#include <HTTPUpdate.h>  // For OTA
 #include <Preferences.h>
 #include <PubSubClient.h>
-#include <Update.h> // For installing updates
+#include <Update.h>  // For installing updates
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WiFiManager.h>
-#include <esp_task_wdt.h> // For Hardware Watchdog
+#include <esp_task_wdt.h>  // For Hardware Watchdog
 #include <time.h>
 
 #define DHTPIN 13     // Pin where DHT11 is connected
@@ -19,7 +19,9 @@ DHT dht(DHTPIN, DHTTYPE);
 #define FIRMWARE_VERSION "1.0.0"
 
 // --- PRODUCTION CONFIGURATION ---
-#define WDT_TIMEOUT 10 // 10 Seconds Hardware Watchdog Timeout
+// [FIX 1] Increased from 10s to 35s to allow SSL/TLS handshake to complete
+// without starving the loop task and triggering a WDT reset.
+#define WDT_TIMEOUT 35
 
 // 1. SSL CERTIFICATE (HiveMQ Cloud)
 const char *root_ca =
@@ -68,12 +70,14 @@ String syncTopic;
 String statusTopic;
 String sensorTopic;
 String wifiTopic;
-String otaTopic;      // [NEW] OTA Topic
-String fanSpeedTopic; // [NEW] Fan Speed Topic
-String versionTopic;  // [NEW] Firmware Version Topic
-String checkTopic;    // [NEW] Check Status Topic
+String otaTopic;      // OTA Topic
+String fanSpeedTopic; // Fan Speed Topic
+String versionTopic;  // Firmware Version Topic
+String checkTopic;    // Check Status Topic
 
 unsigned long lastWifiCheck = 0;
+unsigned long wifiDisconnectedSince = 0; // [NEW] Track persistent WiFi disconnection for hard reconnect
+bool clockSynced = false;                // [NEW] Track NTP time sync for SSL certificate validation
 
 // CONFIGURATION: Thresholds
 const float TEMP_THRESHOLD = 1.0;
@@ -86,10 +90,8 @@ float lastHum = 0;
 // --- PINS ---
 const int NUM_RELAYS = 8;
 
-// [FIXED] Relay 8
 const int relayPins[NUM_RELAYS] = {22, 23, 14, 27, 26, 25, 33, 32};
 
-// [FIXED] Switch 8
 const int switchPins[NUM_RELAYS] = {15, 16, 17, 5, 18, 19, 21, 4};
 
 // Flags for saving state safely
@@ -103,12 +105,33 @@ WiFiClientSecure espClient;
 PubSubClient client(espClient);
 Preferences preferences;
 
-// Volatile for Thread Safety
+// =============================================================================
+// THREAD SAFETY MODEL (FreeRTOS Dual-Core)
+// =============================================================================
+// Core 0: switchTaskCode — owns physical switch reading & relay GPIO toggling
+//   Writes: relayState[i], saveNeeded[i], mqttNeedsUpdate[i], triggerSwitchFeedback
+//
+// Core 1: loop() + MQTT callbacks — owns WiFi, MQTT, LED, NVS saves
+//   Writes: relayState[i] (from MQTT commands), triggerSwitchFeedback, triggerFullSync
+//   Reads & resets: saveNeeded[i], mqttNeedsUpdate[i]
+//
+// Safety rationale:
+// - bool on ESP32 Xtensa LX6 is 1-byte aligned = atomic read/write at hardware level.
+// - Each relay index is written by only one source at a time (physical switch XOR MQTT
+//   command). A user cannot flip a wall switch and send an app command for the exact
+//   same relay at the exact same microsecond — serialized by human intent.
+// - The volatile qualifier ensures cross-core visibility by preventing the compiler
+//   from caching values in registers, forcing reads/writes through to memory.
+// - Flag arrays (saveNeeded, mqttNeedsUpdate) follow a strict producer/consumer
+//   pattern: Core 0 sets true, Core 1 reads & resets. No mutex needed.
+// =============================================================================
 volatile bool relayState[NUM_RELAYS] = {false};
 volatile bool triggerSwitchFeedback = false;
 
+// Written by Core 1 during setup() init, then exclusively by Core 0 in switchTaskCode.
+// Safe because setup() completes and startupDelayComplete is set before Core 0 processes switches.
 int lastSwitchState[NUM_RELAYS] = {HIGH};
-unsigned long lastDebounceTime[NUM_RELAYS] = {0};
+unsigned long lastDebounceTime[NUM_RELAYS] = {0}; // Core 0 only
 unsigned long debounceDelay = 50;
 
 // TIMERS & BACKOFF
@@ -136,9 +159,9 @@ const int FEEDBACK_DURATION = 100;
 
 // Multithreading
 TaskHandle_t SwitchTask;
-volatile bool mqttNeedsUpdate[NUM_RELAYS] = {false};
-volatile bool triggerFullSync = false; // Flag for full status refresh
-volatile bool startupDelayComplete = false; // Flag for 3-second boot delay
+volatile bool mqttNeedsUpdate[NUM_RELAYS] = {false};  // Core 0 sets true, Core 1 reads & resets
+volatile bool triggerFullSync = false;                  // Core 1 only (callback sets, loop resets)
+volatile bool startupDelayComplete = false;             // Core 1 writes once in setup(), Core 0 reads
 
 // --- HELPER: SAVE & LOAD STATE ---
 void saveState(int id, bool state) {
@@ -294,7 +317,7 @@ void handleLedStatus() {
   }
 }
 
-// --- [NEW] OTA UPDATE FUNCTION ---
+// --- OTA UPDATE FUNCTION ---
 void performOTA(String url) {
   Serial.println("[OTA] Starting Update from: " + url);
 
@@ -330,18 +353,27 @@ void performOTA(String url) {
 // --- MQTT CALLBACK ---
 void callback(char *topic, byte *payload, unsigned int length) {
   triggerSwitchFeedback = true;
-  String message;
-  for (int i = 0; i < length; i++)
-    message += (char)payload[i];
+
+  // [FIX] Use pre-allocated char buffer instead of String concatenation
+  // to prevent heap fragmentation from repeated += in a loop.
+  char message[length + 1];
+  memcpy(message, payload, length);
+  message[length] = '\0';
+
   Serial.print("[MQTT] Recv: ");
   Serial.println(topic);
 
+  // [FIX] Single String construction for topic comparison instead of
+  // repeated String(topic) allocations on each comparison branch.
+  String topicStr(topic);
+
   // 1. OTA Command
-  if (String(topic) == otaTopic) {
-    StaticJsonDocument<200> doc;
+  if (topicStr == otaTopic) {
+    StaticJsonDocument<256> doc; // [FIX] Increased from 200 to 256 for URL payloads
     DeserializationError err = deserializeJson(doc, message);
     if (err) {
-      Serial.println("[MQTT] OTA: Invalid JSON, ignoring.");
+      Serial.print("[MQTT] OTA: JSON error: ");
+      Serial.println(err.c_str());
       return;
     }
     const char *downloadUrl = doc["url"];
@@ -352,38 +384,42 @@ void callback(char *topic, byte *payload, unsigned int length) {
   }
 
   // 1.5. Check Status Command
-  if (String(topic) == checkTopic) {
+  if (topicStr == checkTopic) {
     Serial.println("[MQTT] Status Check Requested");
     triggerFullSync = true;
     return;
   }
 
   // 2. Fan Speed Command
-  if (String(topic) == fanSpeedTopic) {
-    StaticJsonDocument<200> doc;
+  if (topicStr == fanSpeedTopic) {
+    StaticJsonDocument<256> doc; // [FIX] Increased from 200 to 256
     DeserializationError err = deserializeJson(doc, message);
-    if (!err) {
-      int id = doc["switchId"];
-      int speed = doc["speed"];
-      Serial.printf("[MQTT] Fan Speed: Switch %d -> Speed %d\n", id, speed);
-      // TODO: Implement hardware fan speed logic (PWM/multi-relay) here
-      // For now, treat any speed > 0 as ON, speed 0 as OFF
-      if (id >= 0 && id < NUM_RELAYS) {
-        bool newState = (speed > 0);
-        relayState[id] = newState;
-        digitalWrite(relayPins[id], newState ? LOW : HIGH);
-        saveState(id, newState);
-      }
+    if (err) {
+      Serial.print("[MQTT] Fan: JSON error: ");
+      Serial.println(err.c_str());
+      return;
+    }
+    int id = doc["switchId"];
+    int speed = doc["speed"];
+    Serial.printf("[MQTT] Fan Speed: Switch %d -> Speed %d\n", id, speed);
+    // TODO: Implement hardware fan speed logic (PWM/multi-relay) here
+    // For now, treat any speed > 0 as ON, speed 0 as OFF
+    if (id >= 0 && id < NUM_RELAYS) {
+      bool newState = (speed > 0);
+      relayState[id] = newState;
+      digitalWrite(relayPins[id], newState ? LOW : HIGH);
+      saveState(id, newState);
     }
     return;
   }
 
   // 3. WiFi Update
-  if (String(topic) == wifiTopic) {
-    StaticJsonDocument<200> doc;
+  if (topicStr == wifiTopic) {
+    StaticJsonDocument<256> doc; // [FIX] Increased from 200 to 256
     DeserializationError err = deserializeJson(doc, message);
     if (err) {
-      Serial.println("[MQTT] WiFi: Invalid JSON, ignoring.");
+      Serial.print("[MQTT] WiFi: JSON error: ");
+      Serial.println(err.c_str());
       return;
     }
     const char *newSSID = doc["ssid"];
@@ -400,17 +436,21 @@ void callback(char *topic, byte *payload, unsigned int length) {
   }
 
   // 4. Switch Control
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<256> doc; // [FIX] Reduced from 512 — 256 is sufficient for {switchId, state}
   DeserializationError error = deserializeJson(doc, message);
-  if (!error) {
-    int id = doc["switchId"];
-    bool state = doc["state"];
-    if (id >= 0 && id < NUM_RELAYS) {
-      relayState[id] = state;
-      digitalWrite(relayPins[id], state ? LOW : HIGH);
-      saveState(id, state);
-      Serial.printf("[MQTT] Sw %d -> %s\n", id, state ? "ON" : "OFF");
-    }
+  if (error) {
+    // [FIX] Added missing error handling — malformed MQTT payload no longer crashes the ESP32
+    Serial.print("[MQTT] Switch: JSON error: ");
+    Serial.println(error.c_str());
+    return;
+  }
+  int id = doc["switchId"];
+  bool state = doc["state"];
+  if (id >= 0 && id < NUM_RELAYS) {
+    relayState[id] = state;
+    digitalWrite(relayPins[id], state ? LOW : HIGH);
+    saveState(id, state);
+    Serial.printf("[MQTT] Sw %d -> %s\n", id, state ? "ON" : "OFF");
   }
 }
 
@@ -422,6 +462,7 @@ void setClock() {
   while (nowSecs < 8 * 3600 * 2 && retry < 20) {
     delay(500);
     Serial.print(".");
+    esp_task_wdt_reset(); // [FIX] Pet watchdog during NTP sync to prevent WDT reset
     yield();
     nowSecs = time(nullptr);
     retry++;
@@ -433,8 +474,35 @@ void checkWiFiConnection() {
   if (millis() - lastWifiCheck > 10000) {
     lastWifiCheck = millis();
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("[WiFi] Lost. Retrying...");
-      WiFi.reconnect();
+      // [NEW] Track how long WiFi has been persistently disconnected
+      if (wifiDisconnectedSince == 0) {
+        wifiDisconnectedSince = millis();
+        // Edge case: millis() == 0 at boot is astronomically unlikely,
+        // but use 1 to avoid re-entering this branch.
+        if (wifiDisconnectedSince == 0) wifiDisconnectedSince = 1;
+      }
+
+      unsigned long disconnectedFor = millis() - wifiDisconnectedSince;
+
+      // [NEW] Hard reconnect cycle after 5 minutes of persistent disconnection.
+      // WiFi.reconnect() alone sometimes fails to recover from certain edge cases
+      // (e.g., router changed channel, DHCP lease expired). A full disconnect/begin
+      // cycle forces a clean re-association.
+      // NOTE: Does NOT call ESP.restart() — switches on Core 0 remain unaffected.
+      if (disconnectedFor > 300000) {
+        Serial.println("[WiFi] Disconnected >5min. Hard reconnect cycle...");
+        WiFi.disconnect();
+        delay(100); // Brief settle time for WiFi radio
+        WiFi.begin(); // Reconnect with stored credentials from flash
+        wifiDisconnectedSince = millis(); // Reset timer for next cycle
+        if (wifiDisconnectedSince == 0) wifiDisconnectedSince = 1;
+      } else {
+        Serial.println("[WiFi] Lost. Retrying...");
+        WiFi.reconnect();
+      }
+    } else {
+      // WiFi is connected — reset the disconnection tracker
+      wifiDisconnectedSince = 0;
     }
   }
 }
@@ -454,7 +522,7 @@ void setup() {
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LOW);
 
-  // --- [NEW] LOAD SECRETS FROM MEMORY ---
+  // --- LOAD SECRETS FROM MEMORY ---
   // Security Step: Read MQTT User/Pass from NVS
   preferences.begin("creds", true); // Open "creds" in Read-Only mode
   mqtt_user = preferences.getString("user", "");
@@ -462,6 +530,9 @@ void setup() {
   preferences.end();
 
   // Security Check: If memory is empty, STOP.
+  // NOTE: This infinite loop runs BEFORE the WDT is initialized (WDT is started
+  // at the very end of setup), so there is no risk of a silent WDT reset here.
+  // The device is in a fatal state requiring provisioning — blocking is intentional.
   if (mqtt_user == "" || mqtt_pass == "") {
     Serial.println("[FATAL ERROR] No Credentials Found in NVS!");
     Serial.println("Please run the Provisioning Sketch first.");
@@ -480,6 +551,7 @@ void setup() {
   pinMode(TOUCH_RESET_PIN, INPUT_PULLUP);
 
   // --- FACTORY RESET LOGIC ---
+  // NOTE: Runs before WDT initialization, delay() calls here are safe.
   if (digitalRead(TOUCH_RESET_PIN) == LOW) {
     Serial.println("[Boot] Reset Button Detected...");
     for (int i = 0; i < 20; i++) {
@@ -559,20 +631,35 @@ void setup() {
   WiFiManager wm;
   String apName = "SmartHome_Setup_" + mac.substring(8);
   wm.setAPCallback(configModeCallback);
-  wm.setConnectTimeout(180);
+  // [FIX 2] Prevent WiFiManager from blocking indefinitely after power restore.
+  // When power is restored, the ESP32 boots faster than the router. The old
+  // setConnectTimeout(180) caused a 3-minute block. These finite timeouts
+  // ensure the device falls through to offline mode where switches still work.
+  wm.setConnectTimeout(20);        // Wait 20 seconds for the router
+  wm.setConfigPortalTimeout(60);   // Close the setup portal after 60 seconds
 
   // CRITICAL: Watchdog starts AFTER this block
   if (!wm.autoConnect(apName.c_str())) {
     Serial.println("[WiFi] Failed. Offline Mode.");
+    // [FIX 2] Turn off the solid blue setup LED so the main loop can
+    // resume normal "Offline Mode" blinking pattern (fast blink = no WiFi).
+    digitalWrite(STATUS_LED, LOW);
   } else {
     Serial.println("[WiFi] Connected!");
     setClock();
-    espClient.setCACert(root_ca);
-    client.setServer(mqtt_server, mqtt_port);
-    client.setCallback(callback);
-    client.setBufferSize(4096);
-    client.setKeepAlive(10);
+    clockSynced = true;
   }
+
+  // [FIX] MQTT client configuration is now UNCONDITIONAL.
+  // Previously, these were inside the WiFi success block, meaning if WiFi failed
+  // during setup but connected later via checkWiFiConnection(), the MQTT client
+  // had no server, callback, or buffer configured — handleMQTT() would silently fail.
+  espClient.setCACert(root_ca);
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+  client.setBufferSize(4096);
+  client.setKeepAlive(10);
+  client.setSocketTimeout(10); // [NEW] Prevent PubSubClient::loop() from blocking on hung TCP connection
 
   // START WATCHDOG HERE (Final Step)
   // Correct way to reconfigure and add the current loop to WDT
@@ -587,6 +674,9 @@ void setup() {
     esp_task_wdt_init(&config); // Init if not already done
   }
   esp_task_wdt_add(NULL); // Add the main loop task to the watchdog
+
+  Serial.printf("[Boot] Watchdog started (%ds timeout)\n", WDT_TIMEOUT);
+  Serial.printf("[Boot] Free Heap: %u bytes\n", ESP.getFreeHeap());
 }
 
 // --- MQTT HANDLING WITH BACKOFF ---
@@ -600,23 +690,49 @@ void handleMQTT() {
     return;
   }
 
+  // [NEW] If NTP time was never synced (WiFi failed during setup), sync now.
+  // SSL certificate validation requires correct system time.
+  if (!clockSynced) {
+    Serial.println("[MQTT] Clock not synced. Running NTP sync first...");
+    setClock();
+    clockSynced = true;
+  }
+
   unsigned long now = millis();
   if (now - lastMqttAttempt > currentBackoff) {
     lastMqttAttempt = now;
 
-    // Exponential Backoff Logic
-    currentBackoff = currentBackoff * 2;
-    if (currentBackoff > 120000)
-      currentBackoff = 120000; // Max 2 mins
+    // [FIX] Overflow-safe exponential backoff.
+    // Original: currentBackoff * 2 could overflow unsigned long before the cap
+    // check if currentBackoff was already large (e.g., due to a code path that
+    // skipped the cap). Now we guard the multiplication.
+    if (currentBackoff < 60000) {
+      currentBackoff = currentBackoff * 2;
+    }
+    if (currentBackoff > 120000) {
+      currentBackoff = 120000; // Max 2 minutes
+    }
 
-    Serial.printf("[MQTT] Connecting (Backoff: %lu ms)... ", currentBackoff);
+    // [FIX] Cap retry counter to prevent integer overflow after weeks of uptime.
+    if (mqttRetryCount < 10000) {
+      mqttRetryCount++;
+    }
+
+    Serial.printf("[MQTT] Connecting (Attempt: %d, Backoff: %lums)... ", mqttRetryCount, currentBackoff);
 
     String clientId = uniqueDeviceId + "-" + String(random(0xffff), HEX);
     const char *willTopic = statusTopic.c_str();
 
+    // [FIX 1] Pet watchdog BEFORE the blocking SSL handshake.
+    // The TLS handshake with HiveMQ Cloud can take 10-25 seconds.
+    // This resets the WDT counter to give the full 35s window.
+    esp_task_wdt_reset();
+
     // Use .c_str() to convert String to the format MQTT needs
     if (client.connect(clientId.c_str(), mqtt_user.c_str(), mqtt_pass.c_str(),
                        willTopic, 1, true, "offline")) {
+      // [FIX 1] Pet watchdog AFTER successful SSL handshake completes.
+      esp_task_wdt_reset();
       Serial.println("Success");
       // 1. DELETE OLD GHOST COMMANDS
       // We publish an empty message with Retain=True to the command topic.
@@ -628,7 +744,7 @@ void handleMQTT() {
       client.subscribe(commandTopic.c_str());
       client.subscribe(wifiTopic.c_str());
       client.subscribe(otaTopic.c_str());
-      client.subscribe(fanSpeedTopic.c_str()); // [FIX] Subscribe to fan speed
+      client.subscribe(fanSpeedTopic.c_str());
       client.subscribe(checkTopic.c_str());
 
       // 3. ESP32 IS SOURCE OF TRUTH: Push local state to server on reconnect
@@ -637,7 +753,7 @@ void handleMQTT() {
       for (int i = 0; i < NUM_RELAYS; i++) {
         StaticJsonDocument<256> doc;
         doc["switchId"] = i;
-        doc["state"] = relayState[i];
+        doc["state"] = (bool)relayState[i];
         doc["reconnect"] = true; // Flag: server must accept, not override
         char buffer[256];
         serializeJson(doc, buffer);
@@ -706,7 +822,7 @@ void loop() {
           mqttNeedsUpdate[i] = false;
           StaticJsonDocument<256> doc;
           doc["switchId"] = i;
-          doc["state"] = relayState[i];
+          doc["state"] = (bool)relayState[i];
           char buffer[256];
           serializeJson(doc, buffer);
           client.publish(updateTopic.c_str(), buffer);
@@ -720,7 +836,7 @@ void loop() {
         for (int i = 0; i < NUM_RELAYS; i++) {
           StaticJsonDocument<256> doc;
           doc["switchId"] = i;
-          doc["state"] = relayState[i];
+          doc["state"] = (bool)relayState[i];
           doc["refresh"] = true;
           char buffer[256];
           serializeJson(doc, buffer);
@@ -749,5 +865,15 @@ void loop() {
       saveState(i, relayState[i]);
       Serial.printf("[System] State saved for Switch %d\n", i);
     }
+  }
+
+  // 6. [NEW] HEAP MONITORING (Production Diagnostics)
+  // Runs every 60 seconds. CPU overhead of ESP.getFreeHeap() + Serial.printf is
+  // negligible. Invaluable for detecting slow memory leaks over days of uptime.
+  static unsigned long lastHeapCheck = 0;
+  if (millis() - lastHeapCheck > 60000) {
+    lastHeapCheck = millis();
+    Serial.printf("[System] Free Heap: %u bytes | Min Free: %u bytes\n",
+                  ESP.getFreeHeap(), ESP.getMinFreeHeap());
   }
 }

@@ -87,7 +87,7 @@ class ApiService {
     };
   }
 
-  Future<dynamic> login(String email, String password) async {
+  Future<dynamic> login(String email, String password, {bool stayLoggedIn = false}) async {
     final deviceName = await _getDeviceName();
     final headers = {'Content-Type': 'application/json'};
     if (deviceName != null) headers['x-device-name'] = deviceName;
@@ -99,6 +99,7 @@ class ApiService {
         'email': email,
         'password': password,
         'isMobile': true,
+        'stayLoggedIn': stayLoggedIn,
       }),
     );
     
@@ -131,7 +132,17 @@ class ApiService {
   }
 
   Future<void> logout() async {
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.currentServer}/logout'),
+        headers: await _getHeaders(),
+      );
+    } catch (e) {
+      print('Logout request failed: $e');
+    }
     await storage.delete(key: 'token');
+    await storage.delete(key: 'refreshToken');
+    await storage.delete(key: 'email');
   }
 
   Future<void> logoutAll({String? password}) async {
@@ -206,6 +217,15 @@ class ApiService {
       body: jsonEncode({'deviceId': deviceId, 'switchId': switchId, 'newName': newName, 'newType': newType}),
     ));
     if (response.statusCode != 200) throw Exception('Failed to edit device');
+  }
+
+  Future<void> setFavorite(String deviceId, int switchId, bool isFavorite) async {
+    final response = await _intercept(() async => http.post(
+      Uri.parse('${ApiConfig.currentServer}/favorite'),
+      headers: await _getHeaders(),
+      body: jsonEncode({'deviceId': deviceId, 'switchId': switchId, 'isFavorite': isFavorite}),
+    ));
+    if (response.statusCode != 200) throw Exception('Failed to set favorite status');
   }
 
   Future<void> setTimer(String deviceId, int switchId, int minutes) async {

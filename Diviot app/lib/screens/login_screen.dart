@@ -20,6 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _stayLoggedIn = true;
 
   @override
   void dispose() {
@@ -43,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       if (_isLogin) {
         await Provider.of<AuthProvider>(context, listen: false)
-            .login(_emailController.text.trim(), _passwordController.text);
+            .login(_emailController.text.trim(), _passwordController.text, stayLoggedIn: _stayLoggedIn);
         
         showToast(context, 'Welcome back!');
         Navigator.pushReplacement(
@@ -290,6 +291,23 @@ class _LoginScreenState extends State<LoginScreen> {
                                           borderSide: BorderSide(color: Colors.red.shade400),
                                         ),
                                       ),
+                                    ),
+                                  ],
+                                  if (_isLogin) ...[
+                                    SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        Checkbox(
+                                          value: _stayLoggedIn,
+                                          onChanged: (val) => setState(() => _stayLoggedIn = val ?? true),
+                                          fillColor: MaterialStateProperty.resolveWith((states) => 
+                                            states.contains(MaterialState.selected) ? Colors.blueAccent : Colors.transparent
+                                          ),
+                                          side: BorderSide(color: Colors.white60, width: 1.5),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                        ),
+                                        Text('Stay logged in', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                                      ],
                                     ),
                                   ],
                                   SizedBox(height: 28),

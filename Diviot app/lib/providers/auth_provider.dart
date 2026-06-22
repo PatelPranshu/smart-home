@@ -32,8 +32,8 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  Future<void> login(String email, String password) async {
-    await _apiService.login(email, password);
+  Future<void> login(String email, String password, {bool stayLoggedIn = false}) async {
+    await _apiService.login(email, password, stayLoggedIn: stayLoggedIn);
     _isAuthenticated = true;
     _email = email;
     await fetchUserProfile();

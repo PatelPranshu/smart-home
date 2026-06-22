@@ -282,11 +282,20 @@ async function emitDeviceUpdates(userIdStr, isBroadcast = false) {
             // Because MongoDB writes for sensors are throttled (once per 60s), 
             // the DB might have stale temperature/humidity. We must overwrite it
             // with the absolute latest values from our memory cache before emitting.
+            // We ALSO merge switch states here to beat MongoDB replica set replication lag.
             devices.forEach(d => {
                 const cachedDevice = deviceCache.get(d.deviceId);
                 if (cachedDevice) {
                     d.temperature = cachedDevice.temperature !== undefined ? cachedDevice.temperature : d.temperature;
                     d.humidity = cachedDevice.humidity !== undefined ? cachedDevice.humidity : d.humidity;
+                    
+                    // Merge latest switch states from optimistic cache
+                    if (cachedDevice.switches) {
+                        d.switches.forEach(sw => {
+                            const cachedSw = cachedDevice.switches.find(s => s.id === sw.id);
+                            if (cachedSw) sw.state = cachedSw.state;
+                        });
+                    }
                 }
             });
 
@@ -675,11 +684,17 @@ mqttClient.on('message', async (topic, message) => {
                 { $set: updateFields }
             );
 
-            // Removed destructive deviceCache.delete(deviceId) to preserve temp/hum memory overlay
+            // OPTIMISTIC CACHE UPDATE: Instead of deleting the cache, update it immediately.
+            // This guarantees emitDeviceUpdates will see the fresh state instantly, 
+            // completely bypassing any MongoDB replica set read-after-write latency.
+            const updatedSw = device.switches.find(s => s.id === data.switchId);
+            if (updatedSw) updatedSw.state = userIntentState;
+            deviceCache.set(deviceId, device);
 
             // EMIT REAL-TIME UPDATE
             if (device && device.owner) {
-                emitDeviceUpdates(device.owner._id ? device.owner._id.toString() : device.owner.toString());
+                const uid = device.owner._id ? device.owner._id.toString() : device.owner.toString();
+                emitDeviceUpdates(uid);
             }
 
             // Skip History and Google Reporting for status check refreshes
@@ -1045,6 +1060,7 @@ app.post('/api/login', [
         deviceInfo: userAgentString,
         deviceName: parsedDeviceName,
         location,
+        isPersistent: stayLoggedIn,
         isPrimary,
         ipAddress,
         expiresAt,
@@ -1131,8 +1147,11 @@ app.post('/api/refresh-token', async (req, res) => {
         session.refreshTokenHash = newRefreshTokenHash;
         const newCookieValue = `${session._id}:${newRawRefreshToken}`;
 
-        // Extend session expiration
-        const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)); // Extend by 1 day on active use
+        // Sliding session expiration: respect the user's original "Stay Logged In" choice
+        const extensionMs = session.isPersistent
+            ? 14 * 24 * 60 * 60 * 1000   // 14 days for persistent sessions
+            : 24 * 60 * 60 * 1000;        // 24 hours for default sessions
+        const expiresAt = new Date(Date.now() + extensionMs);
         await Session.updateOne(
             { _id: session._id },
             {
@@ -1144,13 +1163,13 @@ app.post('/api/refresh-token', async (req, res) => {
             }
         );
 
-        // Set new HttpOnly cookie
+        // Set new HttpOnly cookie with matching lifetime
         const isProduction = process.env.NODE_ENV === 'production';
         res.cookie('refreshToken', newCookieValue, {
             httpOnly: true,
             secure: isProduction,
             sameSite: isProduction ? 'None' : 'Lax',
-            maxAge: 24 * 60 * 60 * 1000,
+            maxAge: extensionMs,
             path: '/'
         });
 
@@ -1525,6 +1544,13 @@ app.post('/api/control', auth, [
         } else {
             updateFields["switches.$.lastOnTime"] = null;
             updateFields["switches.$.timerExpiresAt"] = null;
+        }
+        
+        // Optimistic Cache Update: Prevent UI flicker from DB replica lag
+        if (device) {
+            const cachedSw = device.switches.find(s => s.id === switchId);
+            if (cachedSw) cachedSw.state = state;
+            deviceCache.set(deviceId, device);
         }
         await Device.updateOne(
             { deviceId: deviceId, "switches.id": switchId },
